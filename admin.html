@@ -144,12 +144,13 @@
             <div style="flex:1;min-width:220px">
               <label>Dataset</label>
               <select id="dataset">
-                <option value="unified">Unified (auto-detect)</option>
-                <option value="ports">Ports</option>
-                <option value="counterparties">Companies</option>
-                <option value="procedures">Procedures</option>
-                <option value="company_ports">Company ↔ Port links</option>
-              </select>
+  <option value="ports">Ports</option>
+  <option value="counterparties">Companies</option>
+  <option value="procedures">Procedures</option>
+  <option value="unified">Unified (auto-detect)</option>
+  <!-- Optional if you use a link table -->
+  <option value="company_ports">Company ↔ Port links</option>
+</select>
             </div>
             <div style="flex:1;min-width:220px">
               <label>Mode</label>
@@ -382,17 +383,15 @@ async function processUnified(rows, mode){
     };
 
     // =========================
-    // TAB: Bulk CSV (upserts)
-    // =========================
-    const templates = {
-  unified:
-    "port_name,port_country,port_unlocode,port_latitude,port_longitude,port_zone_code,port_notes," +
-    "company_name,company_type,company_email,company_phone,company_notes," +
-    "procedure_title,procedure_steps,procedure_required_documents,procedure_expiry_date,procedure_notes\n" +
-    "Ajman,AE,AEAJM,25.4052165,55.5136433,ME-MID,Test port," +
-    "Atlantic Shipping,customer,ops@atlantic.example,+971 4 123 4567,VIP," +
-    "Ajman export — Atlantic Shipping,\"1) Notify 48h\\n2) Submit manifest\",\"B/L, Cargo Manifest\",31.12.2027,Seasonal notes",
+// TAB: Bulk CSV (upserts)
+// =========================
 
+// =========================
+// TAB: Bulk CSV (upserts)
+// =========================
+
+// --- 1) Templates shown by the “Download template” link ---
+const templates = {
   ports:
     "name,country,unlocode,latitude,longitude,zone_code,notes\n" +
     "Port Example,GB,GBLON,51.5072,-0.1276,EU-UK,Optional notes",
@@ -406,50 +405,57 @@ async function processUnified(rows, mode){
     "Ajman to Atlantic Shipping,AEAJM,Atlantic Shipping,\"1) Notify 48h\\n2) Submit manifest\",\"B/L, Cargo Manifest\",Optional"
 };
 
-    const chunk = (arr, n=500) => Array.from({length: Math.ceil(arr.length/n)}, (_,i)=>arr.slice(i*n,(i+1)*n));
-    const num = v => v===''||v==null ? null : Number(v);
-    const log = (...a)=>{ const el=$('log'); el.textContent += a.join(' ') + "\n"; };
-    function setCsvMsg(t,cls){ set('csvMsg',t,cls); }
+// ✅ Unified template (single CSV that can contain ports/companies/procedures in any order)
+templates.unified = `dataset,name,country,unlocode,latitude,longitude,zone_code,notes,company_name,company_type,port_unlocode,port_name,steps,required_documents,expiry_date,procedure_notes
+ports,Abidjan Port,CI,CIABJ,5.3167,-4.0167,AF-WA,Main Ivory Coast port,,,,,,
+counterparties,Blue Whale Logistics,customer,,,,,,,,,
+procedures,Abidjan export — Blue Whale Logistics,CI,,,,,Blue Whale Logistics,CIABJ,Abidjan,"1) Notify agent\n2) File manifest","B/L, Manifest",31.12.2027,Seasonal notes
+`;
 
-    async function preloadMaps(){
-      const maps = {};
-      { const {data} = await supabase.from('ports').select('id,unlocode');
-        maps.portByUnlocode = new Map((data||[]).map(r=>[String(r.unlocode).toUpperCase(), r.id])); }
-      { const {data} = await supabase.from('counterparties').select('id,name');
-        maps.companyByName = new Map((data||[]).map(r=>[r.name.trim().toLowerCase(), r.id])); }
-      return maps;
-    }
+// --- 2) Small helpers ---
+const chunk = (arr, n=500) => Array.from({length: Math.ceil(arr.length/n)}, (_,i)=>arr.slice(i*n,(i+1)*n));
+const num   = v => v===''||v==null ? null : Number(v);
+const log   = (...a)=>{ const el=$('log'); el.textContent += a.join(' ') + "\n"; };
+function setCsvMsg(t,cls){ set('csvMsg',t,cls); }
 
-    async function upsertPorts(rows, mode){
-  // small helpers local to this function
+// Build in-memory maps for quick lookups
+async function preloadMaps(){
+  const maps = {};
+  { const {data} = await supabase.from('ports').select('id,unlocode');
+    maps.portByUnlocode = new Map((data||[]).map(r=>[String(r.unlocode).toUpperCase(), r.id])); }
+  { const {data} = await supabase.from('counterparties').select('id,name');
+    maps.companyByName = new Map((data||[]).map(r=>[r.name.trim().toLowerCase(), r.id])); }
+  return maps;
+}
+
+// --- 3) Upserts: Ports ---
+async function upsertPorts(rows, mode){
   const toNum = v => (v === '' || v == null ? null : Number(v));
   const inRange = (n, min, max) =>
     n == null ? null : (isFinite(n) && n >= min && n <= max ? n : null);
 
-  // normalise a single CSV row -> DB payload, or null if not usable
   const clean = (r) => {
     const unlocode = String(r.unlocode || '').trim().toUpperCase();
-    if (!unlocode) return null; // must have UN/LOCODE
+    if (!unlocode) return null; // must have a UN/LOCODE
 
-    const name = (r.name || '').trim();
+    const name    = (r.name || '').trim();
     const country = String(r.country || '').trim().toUpperCase() || null;
 
-    // coerce and range-check
-    const lat = inRange(toNum(r.latitude), -90, 90);
+    const lat = inRange(toNum(r.latitude),  -90,  90);
     const lon = inRange(toNum(r.longitude), -180, 180);
 
     return {
       name,
       country,
       unlocode,
-      latitude: lat,
+      latitude:  lat,
       longitude: lon,
       zone_code: (r.zone_code || '').trim() || null,
-      notes: (r.notes || '').trim() || null
+      notes:     (r.notes     || '').trim() || null
     };
   };
 
-  // Map + dedupe by UN/LOCODE (last occurrence in the CSV wins)
+  // Deduplicate by UN/LOCODE (last wins)
   const dedup = new Map();
   for (const r of rows) {
     const c = clean(r);
@@ -457,11 +463,10 @@ async function processUnified(rows, mode){
     dedup.set(c.unlocode, c);
   }
   const data = Array.from(dedup.values());
-  if (!data.length) { log('ports: nothing to upsert'); return; }
+  if (!data.length){ log('ports: nothing to upsert'); return; }
 
-  const opt = { onConflict: 'unlocode' };
-
-  for (const b of chunk(data, 500)) {
+  const opt = { onConflict:'unlocode' };
+  for (const b of chunk(data, 500)){
     const { error } = await (
       mode === 'insert'
         ? supabase.from('ports').insert(b)
@@ -472,55 +477,67 @@ async function processUnified(rows, mode){
   }
 }
 
-    async function upsertCompanies(rows, mode){
-      const data = rows.map(r=>({
-        name:(r.name||'').trim(),
-        type:(r.type||'').trim()||null,
-        email:(r.email||'').trim()||null,
-        phone:(r.phone||'').trim()||null,
-        notes:(r.notes||'').trim()||null
-      })).filter(r=>r.name);
-      const opt = { onConflict:'name' };
-      for(const b of chunk(data, 500)){
-        const {error} = await (mode==='insert'
-          ? supabase.from('counterparties').insert(b)
-          : supabase.from('counterparties').upsert(b, opt));
-        if(error) throw new Error('counterparties: '+error.message);
-        log(`companies: processed ${b.length}`);
-      }
-    }
+// --- 4) Upserts: Companies (counterparties) ---
+async function upsertCompanies(rows, mode){
+  const data = rows.map(r=>({
+    name:  (r.name  || '').trim(),
+    type:  (r.type  || '').trim() || null,
+    email: (r.email || '').trim() || null,
+    phone: (r.phone || '').trim() || null,
+    notes: (r.notes || '').trim() || null
+  })).filter(r=>r.name); // need a name
 
-    async function upsertProcedures(rows, mode){
-      const maps = await preloadMaps();
-      const data = [];
-      for(const r of rows){
-        const portId = maps.portByUnlocode.get(String(r.port_unlocode||'').toUpperCase());
-        const companyId = maps.companyByName.get(String(r.company_name||'').trim().toLowerCase());
-        if(!portId || !companyId){ log(`skip: could not resolve for "${r.title}" (port=${r.port_unlocode}, company=${r.company_name})`); continue; }
-        data.push({
-  title: (r.title || '').trim(),
-  port_id: portId,
-  customer_counterparty_id: companyId,
-  description: (r.description || '').trim() || null,
-  steps: (r.steps || '').trim() || null,
-  required_documents: (r.required_documents || '').trim() || null,
-  expiry_date: normaliseDate(r.expiry_date || ''),
-  notes: (r.notes || '').trim() || null
-});
-      }
-      if(!data.length){ log('nothing to upsert'); return; }
-      const opt = { onConflict:'port_id,customer_counterparty_id,title' };
-      for(const b of chunk(data, 300)){
-        const {error} = await (mode==='insert'
-          ? supabase.from('procedures').insert(b)
-          : supabase.from('procedures').upsert(b, opt));
-        if(error) throw new Error('procedures: '+error.message);
-        log(`procedures: processed ${b.length}`);
-      }
+  if (!data.length){ log('companies: nothing to upsert'); return; }
+
+  const opt = { onConflict:'name' };
+  for(const b of chunk(data, 500)){
+    const {error} = await (mode==='insert'
+      ? supabase.from('counterparties').insert(b)
+      : supabase.from('counterparties').upsert(b, opt));
+    if(error) throw new Error('counterparties: '+error.message);
+    log(`companies: processed ${b.length}`);
+  }
+}
+
+// --- 5) Upserts: Procedures ---
+async function upsertProcedures(rows, mode){
+  const maps = await preloadMaps();
+  const data = [];
+
+  for(const r of rows){
+    const portId    = maps.portByUnlocode.get(String(r.port_unlocode||'').toUpperCase());
+    const companyId = maps.companyByName.get(String(r.company_name||'').trim().toLowerCase());
+    if(!portId || !companyId){
+      log(`skip: could not resolve for "${r.title}" (port=${r.port_unlocode}, company=${r.company_name})`);
+      continue;
     }
-    
-    async function upsertCompanyPorts(rows, mode){
-  const maps = await preloadMaps(); // uses ports + counterparties already
+    data.push({
+      title: (r.title || '').trim(),
+      port_id: portId,
+      customer_counterparty_id: companyId,
+      description: (r.description || '').trim() || null,
+      steps: (r.steps || '').trim() || null,
+      required_documents: (r.required_documents || '').trim() || null,
+      expiry_date: normaliseDate(r.expiry_date || ''), // accepts DD.MM.YYYY or YYYY-MM-DD
+      notes: (r.notes || '').trim() || null
+    });
+  }
+
+  if(!data.length){ log('procedures: nothing to upsert'); return; }
+
+  const opt = { onConflict:'port_id,customer_counterparty_id,title' };
+  for(const b of chunk(data, 300)){
+    const {error} = await (mode==='insert'
+      ? supabase.from('procedures').insert(b)
+      : supabase.from('procedures').upsert(b, opt));
+    if(error) throw new Error('procedures: '+error.message);
+    log(`procedures: processed ${b.length}`);
+  }
+}
+
+// --- 6) Upserts: Company ↔ Port links (optional; table name may differ) ---
+async function upsertCompanyPorts(rows, mode){
+  const maps = await preloadMaps();
   const data = [];
 
   for (const r of rows){
@@ -532,16 +549,17 @@ async function processUnified(rows, mode){
     }
     data.push({
       company_id: companyId,
-      port_id: portId,
-      role: (r.role || '').trim() || null,
+      port_id:    portId,
+      role:  (r.role  || '').trim() || null,
       notes: (r.notes || '').trim() || null
     });
   }
 
   if (!data.length){ log('company_ports: nothing to upsert'); return; }
 
-  const opt = { onConflict: 'company_id,port_id' };
-  for (const b of chunk(data, 500)){
+  // Adjust table/key if yours differs (assumes unique(company_id,port_id))
+  const opt = { onConflict:'company_id,port_id' };
+  for (const b of chunk(data, 300)){
     const { error } = await (
       mode === 'insert'
         ? supabase.from('company_ports').insert(b)
@@ -552,29 +570,74 @@ async function processUnified(rows, mode){
   }
 }
 
-    $('btnGo').onclick = ()=>{
-      const file = $('fileCsv').files[0];
-      const kind = $('dataset').value;
-      const mode = $('mode').value;
-      if(!file){ return setCsvMsg('Pick a CSV file','err'); }
-      setCsvMsg('Parsing CSV…');
-      $('log').textContent='';
-      Papa.parse(file, {
-        header:true, skipEmptyLines:true, dynamicTyping:false,
-        complete: async (res)=>{
-          const rows = res.data; log(`Rows parsed: ${rows.length}`);
-          try{
-            if(kind==='unified') await processUnified(rows, mode);
-            if(kind==='ports') await upsertPorts(rows, mode);
-            if(kind==='counterparties') await upsertCompanies(rows, mode);
-            if(kind==='procedures') await upsertProcedures(rows, mode);
-            if (kind === 'company_ports') await upsertCompanyPorts(rows, mode);
-            setCsvMsg('Done ✓','ok');
-          }catch(e){ console.error(e); setCsvMsg('Error: '+e.message,'err'); }
-        },
-        error:(e)=> setCsvMsg('CSV parse error: '+e.message,'err')
-      });
-    };
+// --- 7) Unified processor (auto-detect by columns per row) ---
+async function processUnified(rows, mode){
+  // Ports first (requires port_unlocode)
+  const rowsForPorts = rows.filter(r => (r.port_unlocode||'').trim());
+  if (rowsForPorts.length) await upsertPorts(rowsForPorts, mode);
+  else log('unified: no port rows detected');
+
+  // Companies (requires company_name)
+  const rowsForCompanies = rows.filter(r => (r.company_name||'').trim());
+  if (rowsForCompanies.length) await upsertCompanies(rowsForCompanies, mode);
+  else log('unified: no company rows detected');
+
+  // Procedures (requires title + port_unlocode + company_name)
+  const rowsForProcedures = rows.filter(r =>
+    (r.title||'').trim() && (r.port_unlocode||'').trim() && (r.company_name||'').trim()
+  );
+  if (rowsForProcedures.length) await upsertProcedures(rowsForProcedures, mode);
+  else log('unified: no procedure rows detected');
+
+  // Optional link rows (company_name + port_unlocode)
+  const rowsForLinks = rows.filter(r =>
+    (r.company_name||'').trim() && (r.port_unlocode||'').trim()
+  );
+  if (rowsForLinks.length && typeof upsertCompanyPorts === 'function'){
+    await upsertCompanyPorts(rowsForLinks, mode);
+  }
+}
+
+// --- 8) “Download template” link ---
+$('dlTemplate').onclick = (e)=>{
+  e.preventDefault();
+  const kind = $('dataset').value;
+  const blob = new Blob([templates[kind]], {type:'text/csv;charset=utf-8'});
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
+  a.download = kind + ".csv"; a.click();
+};
+
+// --- 9) CSV button handler ---
+$('btnGo').onclick = ()=>{
+  const file = $('fileCsv').files[0];
+  const kind = $('dataset').value;
+  const mode = $('mode').value;
+  if(!file){ return setCsvMsg('Pick a CSV file','err'); }
+  setCsvMsg('Parsing CSV…');
+  $('log').textContent='';
+
+  Papa.parse(file, {
+    header:true,
+    skipEmptyLines:true,
+    dynamicTyping:false,
+    complete: async (res)=>{
+      const rows = res.data;
+      log(`Rows parsed: ${rows.length}`);
+      try{
+        if(kind==='unified')        await processUnified(rows, mode);
+        if(kind==='ports')          await upsertPorts(rows, mode);
+        if(kind==='counterparties') await upsertCompanies(rows, mode);
+        if(kind==='procedures')     await upsertProcedures(rows, mode);
+        if(kind==='company_ports')  await upsertCompanyPorts(rows, mode); // optional
+        setCsvMsg('Done ✓','ok');
+      }catch(e){
+        console.error(e);
+        setCsvMsg('Error: '+e.message,'err');
+      }
+    },
+    error:(e)=> setCsvMsg('CSV parse error: '+e.message,'err')
+  });
+};
   </script>
 </body>
 </html>
