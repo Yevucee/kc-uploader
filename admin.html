@@ -479,13 +479,20 @@ async function upsertProcedures(rows, mode){
   const maps = await preloadMaps();
   const data = [];
 
-  for(const r of rows){
-    const portId    = maps.portByUnlocode.get(String(r.port_unlocode||'').toUpperCase());
-    const companyId = maps.companyByName.get(String(r.company_name||'').trim().toLowerCase());
-    if(!portId || !companyId){
-      log(`skip: could not resolve for "${r.title}" (port=${r.port_unlocode}, company=${r.company_name})`);
-      continue;
-    }
+  for (const r of rows) {
+  const code = String(r.port_unlocode || '').trim().toUpperCase();
+  const pname = String(r.port_name || '').trim().toLowerCase();
+
+  const portId =
+    (code && maps.portByUnlocode.get(code)) ||
+    (pname && maps.portByName.get(pname)) ||
+    null;
+
+  const companyId = maps.companyByName.get(String(r.company_name||'').trim().toLowerCase());
+  if(!portId || !companyId){
+    log(`skip: could not resolve for "${r.title}" (port=${r.port_unlocode||r.port_name||''}, company=${r.company_name})`);
+    continue;
+  }
     data.push({
       title: (r.title || '').trim(),
       port_id: portId,
@@ -516,12 +523,20 @@ async function upsertCompanyPorts(rows, mode){
   const data = [];
 
   for (const r of rows){
-    const companyId = maps.companyByName.get(String(r.company_name || '').trim().toLowerCase());
-    const portId    = maps.portByUnlocode.get(String(r.port_unlocode || '').trim().toUpperCase());
-    if (!companyId || !portId){
-      log(`skip: could not resolve link (company="${r.company_name}", port="${r.port_unlocode}")`);
-      continue;
-    }
+  const companyId = maps.companyByName.get(String(r.company_name || '').trim().toLowerCase());
+
+  const code  = String(r.port_unlocode || '').trim().toUpperCase();
+  const pname = String(r.port_name || '').trim().toLowerCase();
+  const portId =
+    (code && maps.portByUnlocode.get(code)) ||
+    (pname && maps.portByName.get(pname)) ||
+    null;
+
+  if (!companyId || !portId){
+    log(`skip: could not resolve link (company="${r.company_name}", port="${r.port_unlocode||r.port_name||''}")`);
+    continue;
+  }
+}
     data.push({
       company_id: companyId,
       port_id:    portId,
@@ -547,77 +562,93 @@ async function upsertCompanyPorts(rows, mode){
 
 // --- 7) Unified processor (auto-detect by columns per row) ---
 async function processUnified(rows, mode){
-  const ds = v => String(v || '').trim().toLowerCase();
+  const maps = await preloadMaps();
 
-  // 1) PORTS
-  const portRows = rows.filter(r => ds(r.dataset) === 'ports');
-  if (portRows.length) {
-    await upsertPorts(
-      portRows.map(r => ({
-        name:       r.port_name       ?? r.name,
-        country:    r.port_country    ?? r.country,
-        unlocode:   r.port_unlocode   ?? r.unlocode,
-        latitude:   r.port_latitude   ?? r.latitude,
-        longitude:  r.port_longitude  ?? r.longitude,
-        zone_code:  r.port_zone_code  ?? r.zone_code,
-        notes:      r.port_notes      ?? r.notes
-      })),
-      mode
-    );
-  } else {
-    log('unified: no port rows detected');
-  }
-
-  // 2) COMPANIES (counterparties)
-  const companyRows = rows.filter(
-    r => ['counterparties','companies','company'].includes(ds(r.dataset))
+  // 7a) PORTS — any row that mentions a port (by code OR by name)
+  const rowsMentioningPorts = rows.filter(r =>
+    String(r.port_unlocode||'').trim() || String(r.port_name||'').trim()
   );
-  if (companyRows.length) {
-    await upsertCompanies(
-      companyRows.map(r => ({
-        name:  r.company_name  ?? r.name,
-        type:  r.company_type  ?? r.type  ?? null,
-        email: r.company_email ?? r.email ?? null,
-        phone: r.company_phone ?? r.phone ?? null,
-        notes: r.company_notes ?? r.notes ?? null
-      })),
-      mode
-    );
-  } else {
-    log('unified: no company rows detected');
+
+  const newPortRows = [];
+  for (const r of rowsMentioningPorts){
+    const code  = String(r.port_unlocode||'').trim().toUpperCase();
+    const pname = String(r.port_name||'').trim().toLowerCase();
+
+    const resolvedId =
+      (code  && maps.portByUnlocode.get(code)) ||
+      (pname && maps.portByName.get(pname)) ||
+      null;
+
+    if (!resolvedId){
+      // This is a NEW port. Enforce your rule: BOTH name and code required.
+      const hasName = !!pname;
+      const hasCode = !!code;
+      if (!hasName || !hasCode){
+        // Stop the upload with a clear message
+        const missing = !hasName && !hasCode
+          ? 'UN/LOCODE and name'
+          : (!hasCode ? 'UN/LOCODE' : 'name');
+        throw new Error(
+          `New port row is missing ${missing}. ` +
+          `Provide both "port_unlocode" and "port_name" for new ports. ` +
+          `Row: port_unlocode="${r.port_unlocode||''}", port_name="${r.port_name||''}"`
+        );
+      }
+      // Looks like a valid new port row -> queue it for ports upsert
+      newPortRows.push({
+        name:       String(r.port_name||'').trim(),
+        country:    String(r.port_country||r.country||'').trim().toUpperCase() || null,
+        unlocode:   code,
+        latitude:   r.port_latitude,
+        longitude:  r.port_longitude,
+        zone_code:  String(r.port_zone_code||r.zone_code||'').trim() || null,
+        notes:      String(r.port_notes||'').trim() || null
+      });
+    }
   }
 
-  // 3) PROCEDURES
-  const procRows = rows.filter(r => ds(r.dataset) === 'procedures');
-  if (procRows.length) {
-    await upsertProcedures(
-      procRows.map(r => ({
-        title:               r.procedure_title ?? r.title ?? r.name,  // accept any
-        port_unlocode:       r.port_unlocode,
-        company_name:        r.company_name,
-        steps:               r.procedure_steps ?? r.steps ?? null,
-        required_documents:  r.procedure_required_documents ?? r.required_documents ?? null,
-        expiry_date:         r.procedure_expiry_date ?? r.expiry_date ?? null,
-        notes:               r.procedure_notes ?? r.notes ?? null
-      })),
-      mode
-    );
+  if (newPortRows.length){
+    // Deduplicate new ports by code (last wins)
+    const dedup = new Map(newPortRows.map(p => [p.unlocode, p]));
+    await upsertPorts(Array.from(dedup.values()), mode);
+    log(`unified: inserted/updated ${dedup.size} new port(s)`);
   } else {
-    log('unified: no procedure rows detected');
+    log('unified: no new ports to upsert');
   }
 
-  // 4) OPTIONAL: company ↔ port links
-  const linkRows = rows.filter(r => ds(r.dataset) === 'company_ports');
-  if (linkRows.length && typeof upsertCompanyPorts === 'function') {
-    await upsertCompanyPorts(
-      linkRows.map(r => ({
-        company_name: r.company_name ?? r.name,
-        port_unlocode: r.port_unlocode,
-        role:  r.role  ?? null,
-        notes: r.notes ?? null
-      })),
-      mode
-    );
+  // 7b) COMPANIES (requires name)
+  const rowsForCompanies = rows.filter(r => (r.company_name||'').trim());
+  if (rowsForCompanies.length) await upsertCompanies(rowsForCompanies, mode);
+  else log('unified: no company rows detected');
+
+  // 7c) PROCEDURES (need title + at least one of port_unlocode/port_name + company_name)
+  const rowsForProcedures = rows.filter(r =>
+    (String(r.title||r.procedure_title||'').trim()) &&
+    ((String(r.port_unlocode||'').trim()) || (String(r.port_name||'').trim())) &&
+    (String(r.company_name||'').trim())
+  ).map(r => ({
+    // normalize field names for the procedure upsert
+    title:               String(r.title||r.procedure_title||'').trim(),
+    port_unlocode:       r.port_unlocode || '',
+    port_name:           r.port_name || '',
+    company_name:        r.company_name || '',
+    description:         r.description || '',
+    steps:               r.steps || '',
+    required_documents:  r.required_documents || '',
+    expiry_date:         r.expiry_date || '',
+    notes:               r.procedure_notes || r.notes || ''
+  }));
+
+  if (rowsForProcedures.length) await upsertProcedures(rowsForProcedures, mode);
+  else log('unified: no procedure rows detected');
+
+  // 7d) Optional company↔port links (if you use that table)
+  const rowsForLinks = rows.filter(r =>
+    (String(r.company_name||'').trim()) &&
+    ((String(r.port_unlocode||'').trim()) || (String(r.port_name||'').trim()))
+  );
+  if (rowsForLinks.length && typeof upsertCompanyPorts === 'function'){
+    await upsertCompanyPorts(rowsForLinks, mode);
   }
 }
 
