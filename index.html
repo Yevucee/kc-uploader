@@ -2,7 +2,6 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <meta http-equiv="X-UA-Compatible" content="IE=edge" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>Knowledge Centre — Upload</title>
   <style>
@@ -15,8 +14,6 @@
     label{font-weight:600;margin-top:8px;display:block}
     .muted{opacity:.75}.ok{color:#117a2e}.err{color:#b00020}.small{font-size:.9rem}
   </style>
-  <!-- Load the UMD build so window.supabase exists -->
-  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js" defer></script>
 </head>
 <body>
   <h1>Upload a document</h1>
@@ -27,9 +24,7 @@
       <input id="email" placeholder="you@company.com" />
       <button id="btnLogin">Send sign-in link</button>
     </div>
-    <p class="muted small">
-      You’ll receive a magic link; open it on this device.
-    </p>
+    <p class="muted small">You’ll receive a magic link; open it on this device.</p>
     <p id="authMsg"></p>
   </div>
 
@@ -72,126 +67,120 @@
     <p id="msg"></p>
   </div>
 
-  <script>
-    // Run after the UMD script has loaded
-    window.addEventListener('DOMContentLoaded', () => {
-      if (!window.supabase || !window.supabase.createClient) {
-        document.getElementById('authMsg').textContent =
-          'Supabase SDK failed to load. Hard refresh and try again.';
-        return;
-      }
+  <!-- Use ES modules so we don't rely on a global -->
+  <script type="module">
+    import { createClient } from "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm";
 
-      const supabase = window.supabase.createClient(
-        "https://pajwufsizrmwkjveywyh.supabase.co",
-        "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBhand1ZnNpenJtd2tqdmV5d3loIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTQ5MjEyNjIsImV4cCI6MjA3MDQ5NzI2Mn0.atSQj2ekJo_fePOOhMjbzRav98a7nX-TQY3NgsFXk98"
-      );
+    const supabase = createClient(
+      "https://pajwufsizrmwkjveywyh.supabase.co",
+      "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBhand1ZnNpenJtd2tqdmV5d3loIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTQ5MjEyNjIsImV4cCI6MjA3MDQ5NzI2Mn0.atSQj2ekJo_fePOOhMjbzRav98a7nX-TQY3NgsFXk98"
+    );
 
-      // Bind UI handlers
-      document.getElementById('btnLogin').addEventListener('click', login);
-      document.getElementById('btnUpload').addEventListener('click', doUpload);
-      document.getElementById('attachType').addEventListener('change', resetPicker);
-      document.getElementById('searchInput').addEventListener('input', searchNames);
+    // expose for quick console check if needed
+    window.supabaseClient = supabase;
 
-      /* --- Auth (magic link) --- */
-      async function login(){
-        const email = document.getElementById('email').value.trim();
-        if(!email){ setMsg('authMsg','Enter an email','err'); return; }
-        const { error } = await supabase.auth.signInWithOtp({
-          email,
-          options: { emailRedirectTo: window.location.href }
-        });
-        setMsg('authMsg', error ? ('Error: '+error.message) : 'Link sent. Open it on this device.', error?'err':'ok');
-      }
+    // Bind UI handlers after DOM is ready
+    const $ = (id)=>document.getElementById(id);
+    $("#btnLogin").addEventListener("click", login);
+    $("#btnUpload").addEventListener("click", doUpload);
+    $("#attachType").addEventListener("change", resetPicker);
+    $("#searchInput").addEventListener("input", searchNames);
 
-      supabase.auth.onAuthStateChange((_evt, session) => {
-        document.getElementById('uploader').style.display = session ? 'block' : 'none';
+    async function login(){
+      const email = $("#email").value.trim();
+      if(!email){ setMsg('authMsg','Enter an email','err'); return; }
+      const { error } = await supabase.auth.signInWithOtp({
+        email,
+        options: { emailRedirectTo: window.location.href }
       });
+      setMsg('authMsg', error ? ('Error: '+error.message) : 'Link sent. Open it on this device.', error?'err':'ok');
+    }
 
-      /* --- Helpers --- */
-      function setMsg(id, text, cls){ const el=document.getElementById(id); el.className=cls||''; el.textContent=text; }
-      function slugify(s){ return (s||'').toLowerCase().replace(/\s+/g,'_').replace(/[^\w\-.]/g,''); }
-      function resetPicker(){ document.getElementById('pickId').innerHTML=''; document.getElementById('searchInput').value=''; }
-
-      /* --- Search by name --- */
-      async function searchNames(){
-        const type = document.getElementById('attachType').value;
-        const q = document.getElementById('searchInput').value.trim();
-        const pick = document.getElementById('pickId');
-        pick.innerHTML = '';
-        if(!q) return;
-
-        if(type === 'counterparty'){
-          const { data, error } = await supabase
-            .from('counterparties')
-            .select('id,name,type')
-            .ilike('name', `%${q}%`)
-            .order('name')
-            .limit(25);
-          if(error) return setMsg('msg', error.message, 'err');
-          data.forEach(r => { const o=document.createElement('option'); o.value=r.id; o.textContent=`${r.name} (${r.type})`; pick.appendChild(o); });
-        } else {
-          const { data, error } = await supabase
-            .from('procedures')
-            .select('id,title')
-            .ilike('title', `%${q}%`)
-            .order('title')
-            .limit(25);
-          if(error) return setMsg('msg', error.message, 'err');
-          data.forEach(r => { const o=document.createElement('option'); o.value=r.id; o.textContent=r.title; pick.appendChild(o); });
-        }
-      }
-
-      /* --- Upload + metadata insert --- */
-      async function doUpload(){
-        const type  = document.getElementById('attachType').value;
-        const mode  = document.getElementById('conflictMode').value;
-        const id    = document.getElementById('pickId').value;
-        const fname = document.getElementById('docName').value.trim();
-        const notes = document.getElementById('notes').value.trim();
-        const file  = document.getElementById('file').files[0];
-        const msg   = document.getElementById('msg');
-
-        if(!id){ msg.innerHTML='<span class="err">Pick a company/procedure first.</span>'; return; }
-        if(!file){ msg.innerHTML='<span class="err">Choose a file.</span>'; return; }
-
-        const base = (type==='counterparty') ? 'counterparties' : 'procedures';
-        const displayName = (fname || file.name).trim();
-        const targetName  = slugify(displayName) || slugify(file.name);
-
-        // Pick storage path with conflict handling
-        let objectPath = `${base}/${id}/${targetName}`;
-        const { data:list } = await supabase.storage.from('docs').list(`${base}/${id}`, { search: targetName });
-        const exists = (list || []).some(x => x.name === targetName);
-        if(exists){
-          const ext  = targetName.includes('.') ? targetName.slice(targetName.lastIndexOf('.')) : '';
-          const stem = ext ? targetName.slice(0, -ext.length) : targetName;
-          const stamp = new Date().toISOString().slice(0,10);
-          if(mode==='duplicate' || mode==='append'){ objectPath = `${base}/${id}/${stem}-${stamp}${ext}`; }
-          // overwrite keeps the same name
-        }
-
-        // Upload file
-        const { error: upErr } = await supabase.storage.from('docs')
-          .upload(objectPath, file, { upsert: mode==='overwrite' });
-        if(upErr){ msg.innerHTML = `<span class="err">Upload failed: ${upErr.message}</span>`; return; }
-
-        // Insert metadata
-        const storage_path = `docs/${objectPath}`;
-        const payload = { name: displayName, storage_path, notes: notes || null };
-        let ins;
-        if(type==='counterparty'){
-          payload.counterparty_id = id;
-          ins = await supabase.from('counterparty_documents').insert(payload);
-        } else {
-          payload.procedure_id = id;
-          ins = await supabase.from('procedure_documents').insert(payload);
-        }
-        if(ins.error){ msg.innerHTML = `<span class="err">Saved file but DB insert failed: ${ins.error.message}</span>`; return; }
-
-        msg.innerHTML = `<span class="ok">Uploaded and saved ✔</span>`;
-        document.getElementById('file').value='';
-      }
+    supabase.auth.onAuthStateChange((_evt, session) => {
+      $("#uploader").style.display = session ? 'block' : 'none';
     });
+
+    function setMsg(id, text, cls){ const el=$(id); el.className=cls||''; el.textContent=text; }
+    function slugify(s){ return (s||'').toLowerCase().replace(/\s+/g,'_').replace(/[^\w\-.]/g,''); }
+    function resetPicker(){ $("#pickId").innerHTML=''; $("#searchInput").value=''; }
+
+    async function searchNames(){
+      const type = $("#attachType").value;
+      const q = $("#searchInput").value.trim();
+      const pick = $("#pickId");
+      pick.innerHTML = '';
+      if(!q) return;
+
+      if(type === 'counterparty'){
+        const { data, error } = await supabase
+          .from('counterparties')
+          .select('id,name,type')
+          .ilike('name', `%${q}%`)
+          .order('name')
+          .limit(25);
+        if(error) return setMsg('msg', error.message, 'err');
+        data.forEach(r => { const o=document.createElement('option'); o.value=r.id; o.textContent=`${r.name} (${r.type})`; pick.appendChild(o); });
+      } else {
+        const { data, error } = await supabase
+          .from('procedures')
+          .select('id,title')
+          .ilike('title', `%${q}%`)
+          .order('title')
+          .limit(25);
+        if(error) return setMsg('msg', error.message, 'err');
+        data.forEach(r => { const o=document.createElement('option'); o.value=r.id; o.textContent=r.title; pick.appendChild(o); });
+      }
+    }
+
+    async function doUpload(){
+      const type  = $("#attachType").value;
+      const mode  = $("#conflictMode").value;
+      const id    = $("#pickId").value;
+      const fname = $("#docName").value.trim();
+      const notes = $("#notes").value.trim();
+      const file  = $("#file").files[0];
+      const msg   = $("#msg");
+
+      if(!id){ msg.innerHTML='<span class="err">Pick a company/procedure first.</span>'; return; }
+      if(!file){ msg.innerHTML='<span class="err">Choose a file.</span>'; return; }
+
+      const base = (type==='counterparty') ? 'counterparties' : 'procedures';
+      const displayName = (fname || file.name).trim();
+      const targetName  = slugify(displayName) || slugify(file.name);
+
+      // Check name conflict
+      let objectPath = `${base}/${id}/${targetName}`;
+      const { data:list } = await supabase.storage.from('docs').list(`${base}/${id}`, { search: targetName });
+      const exists = (list || []).some(x => x.name === targetName);
+      if(exists){
+        const ext  = targetName.includes('.') ? targetName.slice(targetName.lastIndexOf('.')) : '';
+        const stem = ext ? targetName.slice(0, -ext.length) : targetName;
+        const stamp = new Date().toISOString().slice(0,10);
+        if(mode==='duplicate' || mode==='append'){ objectPath = `${base}/${id}/${stem}-${stamp}${ext}`; }
+        // overwrite keeps same name
+      }
+
+      // Upload to Storage
+      const { error: upErr } = await supabase.storage.from('docs')
+        .upload(objectPath, file, { upsert: mode==='overwrite' });
+      if(upErr){ msg.innerHTML = `<span class="err">Upload failed: ${upErr.message}</span>`; return; }
+
+      // Save metadata
+      const storage_path = `docs/${objectPath}`;
+      const payload = { name: displayName, storage_path, notes: notes || null };
+      let ins;
+      if(type==='counterparty'){
+        payload.counterparty_id = id;
+        ins = await supabase.from('counterparty_documents').insert(payload);
+      } else {
+        payload.procedure_id = id;
+        ins = await supabase.from('procedure_documents').insert(payload);
+      }
+      if(ins.error){ msg.innerHTML = `<span class="err">Saved file but DB insert failed: ${ins.error.message}</span>`; return; }
+
+      msg.innerHTML = `<span class="ok">Uploaded and saved ✔</span>`;
+      $("#file").value='';
+    }
   </script>
 </body>
 </html>
