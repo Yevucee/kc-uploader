@@ -578,21 +578,7 @@ async function processUnified(rows, mode){
       (pname && maps.portByName.get(pname)) ||
       null;
 
-    if (!resolvedId){
-      // This is a NEW port. Enforce your rule: BOTH name and code required.
-      const hasName = !!pname;
-      const hasCode = !!code;
-      if (!hasName || !hasCode){
-        // Stop the upload with a clear message
-        const missing = !hasName && !hasCode
-          ? 'UN/LOCODE and name'
-          : (!hasCode ? 'UN/LOCODE' : 'name');
-        throw new Error(
-          `New port row is missing ${missing}. ` +
-          `Provide both "port_unlocode" and "port_name" for new ports. ` +
-          `Row: port_unlocode="${r.port_unlocode||''}", port_name="${r.port_name||''}"`
-        );
-      }
+    
       // Looks like a valid new port row -> queue it for ports upsert
       newPortRows.push({
         name:       String(r.port_name||'').trim(),
