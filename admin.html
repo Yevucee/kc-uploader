@@ -1,521 +1,599 @@
-<!-- App logic with Supabase -->
-<script type="module">
-  import { createClient } from "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm";
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <title>Knowledge Centre — Admin</title>
+  <link rel="icon" href="data:,">
+  <style>
+    :root{--b:#eee;--t:#222;--muted:#666;--ok:#117a2e;--err:#b00020}
+    body{font-family:system-ui,Segoe UI,Roboto,Arial;margin:24px;max-width:1000px;color:var(--t)}
+    h1{margin:0 0 16px}
+    .tabs{display:flex;gap:8px;margin:10px 0 16px}
+    .tab{border:1px solid var(--b);border-bottom:none;padding:10px 14px;border-radius:10px 10px 0 0;background:#fafafa;cursor:pointer}
+    .tab.active{background:#fff;font-weight:600}
+    .panel{border:1px solid var(--b);border-radius:0 12px 12px 12px;padding:16px}
+    .card{border:1px solid var(--b);border-radius:12px;padding:14px;margin:16px 0}
+    .row{display:flex;gap:12px;flex-wrap:wrap}
+    input,select,textarea,button{padding:10px;border:1px solid #ddd;border-radius:8px}
+    input,select,textarea{width:100%}
+    button{cursor:pointer;background:#fff}
+    label{font-weight:600;margin-top:8px;display:block}
+    .muted{color:var(--muted)} .ok{color:var(--ok)} .err{color:var(--err)} .small{font-size:.9rem}
+    pre{white-space:pre-wrap;background:#fafafa;border:1px solid var(--b);padding:12px;border-radius:8px;max-height:260px;overflow:auto}
+    .hide{display:none}
+  </style>
+</head>
+<body>
+  <h1>Knowledge Centre — Admin</h1>
 
-  // === Supabase init (project URL + publishable key)
-  const supabase = createClient(
-    "https://pajwufsizrmwkjveywyh.supabase.co",
-    "sb_publishable_oqLNX4lmIcMU7tiTaYz2JQ_IadAg2jm"
-  );
+  <div class="card" id="auth">
+    <p><strong>Sign in</strong> with your work email.</p>
+    <div class="row">
+      <input id="email" placeholder="you@company.com"/>
+      <button id="btnLogin">Send sign-in link</button>
+    </div>
+    <p class="muted small">You’ll receive a magic link; open it on this device.</p>
+    <p id="authMsg"></p>
+  </div>
 
-  // ===== Small DOM helpers =====
-  const $ = id => document.getElementById(id);
-  const set = (id, text, cls) => { const el=$(id); if(!el) return; el.className=cls||''; el.textContent=text; };
-  const log = (...a)=>{ const el=$('log'); if(el) el.textContent += a.join(' ') + "\n"; };
+  <div id="app" class="hide">
+    <div class="tabs">
+      <div class="tab active" data-tab="docs">Documents</div>
+      <div class="tab" data-tab="single">Add procedure</div>
+      <div class="tab" data-tab="bulk">Bulk CSV upload</div>
+    </div>
 
-  // ===== Auth (magic link) =====
-  $('btnLogin').onclick = async () => {
-    const email = $('email').value.trim();
-    if(!email){ set('authMsg','Enter an email','err'); return; }
-    const { error } = await supabase.auth.signInWithOtp({
-      email,
-      options: { emailRedirectTo: window.location.href }
-    });
-    set('authMsg', error ? ('Error: '+error.message) : 'Link sent. Open it on this device.', error?'err':'ok');
-  };
-  function onSession(session){
-    $('auth').classList.toggle('hide', !!session);
-    $('app').classList.toggle('hide', !session);
-  }
-  supabase.auth.onAuthStateChange((_e, session)=> onSession(session));
-  (async()=>{ const {data:{session}} = await supabase.auth.getSession(); onSession(session); })();
+    <div class="panel">
 
-  // ===== Tabs =====
-  document.querySelectorAll('.tab').forEach(t=>{
-    t.addEventListener('click', ()=>{
-      document.querySelectorAll('.tab').forEach(x=>x.classList.remove('active'));
-      t.classList.add('active');
-      const name = t.dataset.tab;
-      document.querySelectorAll('section[id^="tab-"]').forEach(p=>p.classList.add('hide'));
-      $('tab-'+name).classList.remove('hide');
-    });
-  });
+      <section id="tab-docs">
+        <div class="card">
+          <h2 style="margin-top:0">Upload a document</h2>
+          <div class="row">
+            <div style="flex:1;min-width:240px">
+              <label>Attach to</label>
+              <select id="attachType">
+                <option value="counterparty">Company</option>
+                <option value="procedure">Procedure</option>
+              </select>
+            </div>
+            <div style="flex:1;min-width:240px">
+              <label>If filename already exists</label>
+              <select id="conflictMode">
+                <option value="append">Append (keep both)</option>
+                <option value="overwrite">Overwrite existing</option>
+                <option value="duplicate">Duplicate (add suffix)</option>
+              </select>
+            </div>
+          </div>
+          <label>Search name</label>
+          <input id="searchInput" placeholder="Start typing company or procedure…"/>
+          <div class="muted small">Pick one below:</div>
+          <select id="pickId" size="6" style="width:100%"></select>
+          <label>Document name (how it appears)</label>
+          <input id="docName" placeholder="e.g., KYC Form, Master Agreement, Bill of Lading"/>
+          <label>Notes (optional)</label>
+          <textarea id="notes" rows="3" placeholder="Any context or expiry date"></textarea>
+          <label>File</label>
+          <input id="file" type="file"/>
+          <div class="row" style="margin-top:12px">
+            <button id="btnUpload">Upload & save</button>
+          </div>
+          <p id="msg"></p>
+        </div>
+      </section>
 
-  // ===== Utilities =====
-  const chunk = (arr, n=500) => Array.from({length: Math.ceil(arr.length/n)}, (_,i)=>arr.slice(i*n,(i+1)*n));
-  const toNum = v => (v === '' || v == null ? null : Number(v));
-  const inRange = (n, min, max) => n == null ? null : (isFinite(n) && n >= min && n <= max ? n : null);
+      <section id="tab-single" class="hide">
+        <div class="card">
+          <h2 style="margin-top:0">Create a procedure</h2>
+          <div class="row">
+            <div style="flex:1;min-width:280px">
+              <label>Company</label>
+              <input id="procCompanyQuery" placeholder="Type company name…"/>
+              <select id="procCompanyPick" size="6" style="width:100%;margin-top:8px"></select>
+            </div>
+            <div style="flex:1;min-width:280px">
+              <label>Port</label>
+              <input id="procPortQuery" placeholder="Type UN/LOCODE or port name…"/>
+              <select id="procPortPick" size="6" style="width:100%;margin-top:8px"></select>
+            </div>
+          </div>
+          <label>Procedure title</label>
+          <input id="procTitle" placeholder="e.g., Ajman export to Atlantic Shipping"/>
+          <label>Description</label>
+          <textarea id="procDescription" rows="3" placeholder="Short summary of the workflow"></textarea>
+          <label>Steps</label>
+          <textarea id="procSteps" rows="4" placeholder="1) …&#10;2) …"></textarea>
+          <label>Required documents</label>
+          <textarea id="procReqDocs" rows="3" placeholder="B/L, Cargo Manifest, SOPEP…"></textarea>
+          <label>Expiry date (optional)</label>
+          <input id="procExpiry" type="date"/>
+          <label>Notes (optional)</label>
+          <textarea id="procNotes" rows="3" placeholder="Any extra context"></textarea>
+          <div class="row" style="margin-top:12px">
+            <button id="btnSaveProc">Save procedure</button>
+          </div>
+          <p id="procMsg"></p>
+        </div>
+      </section>
 
-  function normaliseDate(s) {
-    if (!s) return null;
-    s = String(s).trim();
-    if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;               // ISO
-    const m = s.match(/^(\d{2})\.(\d{2})\.(\d{4})$/);           // DD.MM.YYYY
-    if (m) return `${m[3]}-${m[2]}-${m[1]}`;
-    return null;
-  }
+      <section id="tab-bulk" class="hide">
+        <div class="card">
+          <h2 style="margin-top:0">Bulk upload (CSV)</h2>
+          <div class="row">
+            <div style="flex:1;min-width:220px">
+              <label>Dataset</label>
+              <select id="dataset">
+                <option value="ports">Ports</option>
+                <option value="counterparties">Companies</option>
+                <option value="procedures">Procedures</option>
+                <option value="unified">Unified (auto-detect)</option>
+                <option value="company_ports">Company ↔ Port links</option>
+              </select>
+            </div>
+            <div style="flex:1;min-width:220px">
+              <label>Mode</label>
+              <select id="mode">
+                <option value="upsert">Upsert (update or insert)</option>
+                <option value="insert">Insert only</option>
+                <option value="update">Update only</option>
+              </select>
+            </div>
+            <div style="flex:2;min-width:260px">
+              <label>CSV file</label>
+              <input id="fileCsv" type="file" accept=".csv,text/csv"/>
+            </div>
+          </div>
+          <div class="row" style="margin-top:12px">
+            <button id="btnGo">Process CSV</button>
+            <a href="#" id="dlTemplate" class="muted small">Download template</a>
+          </div>
+          <p id="csvMsg" class="muted"></p>
+          <pre id="log" class="small"></pre>
+        </div>
+      </section>
 
-  // ===== Preload maps (ports by CODE and by NAME; companies by NAME) =====
-  async function preloadMaps(){
-    const maps = {};
-    {
-      const { data } = await supabase.from('ports').select('id,unlocode,name');
-      maps.portByUnlocode = new Map((data||[]).map(r => [String(r.unlocode||'').toUpperCase(), r.id]));
-      maps.portByName     = new Map((data||[]).map(r => [String(r.name||'').trim().toLowerCase(), r.id]));
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
+
+  <script type="module">
+    import { createClient } from "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm";
+
+    // === Supabase init (project URL + publishable key)
+    const supabase = createClient(
+      "https://pajwufsizrmwkjveywyh.supabase.co",
+      "sb_publishable_oqLNX4lmIcMU7tiTaYz2JQ_IadAg2jm"
+    );
+    window.supabaseClient = supabase; // for quick console checks
+    const $ = id => document.getElementById(id);
+    const set = (id, text, cls)=>{ const el=$(id); if(!el) return; el.className=cls||''; el.textContent=text; };
+
+    function normaliseDate(s) {
+      if (!s) return null;
+      s = s.trim();
+      if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+      const m = s.match(/^(\d{2})\.(\d{2})\.(\d{4})$/);
+      if (m) return `${m[3]}-${m[2]}-${m[1]}`;
+      return null;
     }
-    {
-      const { data } = await supabase.from('counterparties').select('id,name');
-      maps.companyByName = new Map((data||[]).map(r => [String(r.name||'').trim().toLowerCase(), r.id]));
-    }
-    return maps;
-  }
 
-  // =========================
-  // TAB: Documents (existing)
-  // =========================
-  function slugify(s){ return (s||'').toLowerCase().replace(/\s+/g,'_').replace(/[^\w\-.]/g,''); }
-  async function searchNames(){
-    const type = $('attachType').value;
-    const q = $('searchInput').value.trim();
-    const pick = $('pickId'); pick.innerHTML='';
-    if(!q) return;
-
-    if(type==='counterparty'){
-      const {data,error} = await supabase.from('counterparties')
-        .select('id,name,type').ilike('name', `%${q}%`).order('name').limit(25);
-      if(error) return set('msg', error.message, 'err');
-      (data||[]).forEach(r=>{ const o=document.createElement('option'); o.value=r.id; o.textContent=`${r.name} (${r.type||'-'})`; pick.appendChild(o);});
-    } else {
-      const {data,error} = await supabase.from('procedures')
-        .select('id,title').ilike('title', `%${q}%`).order('title').limit(25);
-      if(error) return set('msg', error.message, 'err');
-      (data||[]).forEach(r=>{ const o=document.createElement('option'); o.value=r.id; o.textContent=r.title; pick.appendChild(o);});
-    }
-  }
-  $('searchInput').addEventListener('input', searchNames);
-
-  $('btnUpload').onclick = async ()=>{
-    const type  = $('attachType').value;
-    const mode  = $('conflictMode').value;
-    const id    = $('pickId').value;
-    const fname = $('docName').value.trim();
-    const notes = $('notes').value.trim();
-    const file  = $('file').files[0];
-
-    if(!id)   return set('msg','Pick a company/procedure first.','err');
-    if(!file) return set('msg','Choose a file.','err');
-
-    const base = (type==='counterparty') ? 'counterparties' : 'procedures';
-    const displayName = (fname || file.name).trim();
-    const targetName  = slugify(displayName) || slugify(file.name);
-
-    let objectPath = `${base}/${id}/${targetName}`;
-    const {data:list} = await supabase.storage.from('docs').list(`${base}/${id}`, { search: targetName });
-    const exists = (list||[]).some(x => x.name === targetName);
-    if(exists){
-      const ext  = targetName.includes('.') ? targetName.slice(targetName.lastIndexOf('.')) : '';
-      const stem = ext ? targetName.slice(0, -ext.length) : targetName;
-      const stamp = new Date().toISOString().slice(0,10);
-      if(mode==='duplicate' || mode==='append'){ objectPath = `${base}/${id}/${stem}-${stamp}${ext}`; }
-    }
-    const { error: upErr } = await supabase.storage.from('docs')
-      .upload(objectPath, file, { upsert: mode==='overwrite' });
-    if(upErr) return set('msg', 'Upload failed: '+upErr.message, 'err');
-
-    const storage_path = `docs/${objectPath}`;
-    const payload = { name: displayName, storage_path, notes: notes || null };
-    let ins;
-    if(type==='counterparty'){ payload.counterparty_id = id; ins = await supabase.from('counterparty_documents').insert(payload); }
-    else { payload.procedure_id = id; ins = await supabase.from('procedure_documents').insert(payload); }
-    if(ins.error) return set('msg','Saved file but DB insert failed: '+ins.error.message,'err');
-
-    set('msg','Uploaded and saved ✔','ok'); $('file').value='';
-  };
-
-  // =========================
-  // TAB: Add single procedure (existing)
-  // =========================
-  async function searchCompaniesForProc(){
-    const q = ($('procCompanyQuery')?.value || '').trim();
-    const pick = $('procCompanyPick'); pick.innerHTML='';
-    if(!q) return;
-    const {data,error} = await supabase.from('counterparties').select('id,name,type')
-      .ilike('name', `%${q}%`).order('name').limit(25);
-    if(error) return set('procMsg', error.message, 'err');
-    (data||[]).forEach(r=>{ const o=document.createElement('option'); o.value=r.id; o.textContent=`${r.name} (${r.type||'-'})`; pick.appendChild(o); });
-  }
-  async function searchPortsForProc(){
-    const q = ($('procPortQuery')?.value || '').trim();
-    const pick = $('procPortPick'); pick.innerHTML='';
-    if(!q) return;
-    const {data,error} = await supabase.from('ports').select('id,name,unlocode')
-      .or(`name.ilike.%${q}%,unlocode.ilike.%${q}%`).order('name').limit(25);
-    if(error) return set('procMsg', error.message, 'err');
-    (data||[]).forEach(r=>{ const o=document.createElement('option'); o.value=r.id; o.textContent=`${r.name} (${r.unlocode})`; pick.appendChild(o); });
-  }
-  $('procCompanyQuery')?.addEventListener('input', searchCompaniesForProc);
-  $('procPortQuery')?.addEventListener('input', searchPortsForProc);
-
-  $('btnSaveProc').onclick = async ()=>{
-    const companyId = $('procCompanyPick')?.value;
-    const portId    = $('procPortPick')?.value;
-    const title     = ($('procTitle')?.value || '').trim();
-    const description = ($('procDescription')?.value || '').trim() || null;
-    const steps       = ($('procSteps')?.value || '').trim() || null;
-    const reqDocs     = ($('procReqDocs')?.value || '').trim() || null;
-    const expiryRaw   = document.getElementById('procExpiry').value;
-    const notes       = ($('procNotes')?.value || '').trim() || null;
-
-    if(!companyId || !portId) return set('procMsg','Pick a company and a port','err');
-    if(!title) return set('procMsg','Enter a procedure title','err');
-
-    const payload = {
-      title,
-      port_id: portId,
-      customer_counterparty_id: companyId,
-      description,
-      steps,
-      required_documents: reqDocs,
-      expiry_date: normaliseDate(expiryRaw),
-      notes
+    // ----- Auth (magic link)
+    $('btnLogin').onclick = async () => {
+      const email = $('email').value.trim();
+      if(!email){ set('authMsg','Enter an email','err'); return; }
+      const { error } = await supabase.auth.signInWithOtp({
+        email,
+        options: { emailRedirectTo: window.location.href }
+      });
+      set('authMsg', error ? ('Error: '+error.message) : 'Link sent. Open it on this device.', error?'err':'ok');
     };
-    const { error } = await supabase.from('procedures')
-      .upsert(payload, { onConflict: 'port_id,customer_counterparty_id,title' });
-    if(error) return set('procMsg','Error: '+error.message,'err');
-    set('procMsg','Saved ✓','ok');
-  };
 
-  // =========================
-  // TAB: Bulk CSV (upserts)
-  // =========================
-
-  // --- Templates for “Download template” ---
-  const templates = {
-    ports:
-      "name,country,unlocode,latitude,longitude,zone_code,notes\n" +
-      "Port Example,GB,GBLON,51.5072,-0.1276,EU-UK,Optional notes",
-    counterparties:
-      "name,type,email,phone,notes\n" +
-      "Atlantic Shipping,customer,ops@example.com,+44 20 1234 5678,Key customer",
-    procedures:
-      "title,port_unlocode,company_name,description,steps,required_documents,expiry_date,notes\n" +
-      "Ajman to Atlantic Shipping,AEAJM,Atlantic Shipping,Optional description,\"1) Notify 48h\\n2) Submit manifest\",\"B/L, Cargo Manifest\",31.12.2027,Optional notes",
-    company_ports:
-      "company_name,port_unlocode,port_name,role,notes\n" +
-      "Atlantic Shipping,AEAJM,Ajman,agent,Optional"
-  };
-
-  // Unified template (rows can be any of the below; dataset column optional)
-  templates.unified =
-`dataset,name,country,unlocode,latitude,longitude,zone_code,notes,company_name,company_type,port_unlocode,port_name,description,steps,required_documents,expiry_date,procedure_notes,role
-ports,Abidjan Port,CI,CIABJ,5.3167,-4.0167,AF-WA,Main Ivory Coast port,,,,,,,,,,
-counterparties,Blue Whale Logistics,customer,,,,,,,,,,,,,
-procedures,,,,,,,Blue Whale Logistics,,,Abidjan export — Blue Whale Logistics,"1) Notify agent\\n2) File manifest","B/L, Manifest",31.12.2027,Seasonal notes,
-company_ports,,,,,,,,,CIABJ,Abidjan,,,,,,agent
-`;
-
-  $('dlTemplate').onclick = (e)=>{
-    e.preventDefault();
-    const kind = $('dataset').value;
-    const blob = new Blob([templates[kind]], {type:'text/csv;charset=utf-8'});
-    const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
-    a.download = kind + ".csv"; a.click();
-  };
-
-  // --- Ports upsert (single dataset) ---
-  async function upsertPorts(rows, mode){
-    // new ports MUST have code + name; for pure updates code is enough
-    const rowsClean = rows.map(r=>{
-      const code = String(r.unlocode||'').trim().toUpperCase();
-      const name = String(r.name||'').trim();
-      const country = String(r.country||'').trim().toUpperCase() || null;
-      const lat = inRange(toNum(r.latitude), -90, 90);
-      const lon = inRange(toNum(r.longitude), -180, 180);
-      return {
-        name: name || null,
-        country,
-        unlocode: code,
-        latitude: lat,
-        longitude: lon,
-        zone_code: (r.zone_code||'').trim() || null,
-        notes: (r.notes||'').trim() || null
-      };
-    }).filter(x => x.unlocode);
-
-    // if creating new ones (no existing in DB), name must be provided;
-    // we allow backend to reject if constraint fails, but we can pre-check in Unified (stricter).
-
-    // dedupe by code (last wins)
-    const dedup = new Map();
-    for (const r of rowsClean) dedup.set(r.unlocode, r);
-    const data = Array.from(dedup.values());
-    if(!data.length){ log('ports: nothing to upsert'); return; }
-
-    const opt = { onConflict:'unlocode' };
-    for (const b of chunk(data, 500)){
-      const q = (mode==='insert')
-        ? supabase.from('ports').insert(b)
-        : (mode==='update'
-            ? supabase.from('ports').upsert(b, {...opt, ignoreDuplicates:false})
-            : supabase.from('ports').upsert(b, opt));
-      const { error } = await q;
-      if (error) throw new Error('ports: '+error.message);
-      log(`ports: processed ${b.length}`);
+    function onSession(session){
+      $('auth').classList.toggle('hide', !!session);
+      $('app').classList.toggle('hide', !session);
     }
-  }
 
-  // --- Companies upsert (single dataset) ---
-  async function upsertCompanies(rows, mode){
-    // normalise and dedupe by name (case-insensitive)
-    const dedup = new Map();
-    for (const r of rows){
-      const name = String(r.name || r.company_name || '').trim();
-      if(!name) continue;
-      dedup.set(name.toLowerCase(), {
-        name,
-        type: (r.type || r.company_type || '').trim() || null,
+    supabase.auth.onAuthStateChange((_e, session)=> onSession(session));
+    (async()=>{ const {data:{session}} = await supabase.auth.getSession(); onSession(session); })();
+
+    // ----- Tabs
+    document.querySelectorAll('.tab').forEach(t=>{
+      t.addEventListener('click', ()=>{
+        document.querySelectorAll('.tab').forEach(x=>x.classList.remove('active'));
+        t.classList.add('active');
+        const name = t.dataset.tab;
+        document.querySelectorAll('section[id^="tab-"]').forEach(p=>p.classList.add('hide'));
+        $('tab-'+name).classList.remove('hide');
+      });
+    });
+
+    // =========================
+    // TAB: Documents
+    // =========================
+    function slugify(s){ return (s||'').toLowerCase().replace(/\s+/g,'_').replace(/[^\w\-.]/g,''); }
+
+    async function searchNames(){
+      const type = $('attachType').value;
+      const q = $('searchInput').value.trim();
+      const pick = $('pickId'); pick.innerHTML='';
+      if(!q) return;
+
+      if(type==='counterparty'){
+        const {data,error} = await supabase.from('counterparties')
+          .select('id,name,type').ilike('name', `%${q}%`).order('name').limit(25);
+        if(error) return set('msg', error.message, 'err');
+        (data||[]).forEach(r=>{ const o=document.createElement('option'); o.value=r.id; o.textContent=`${r.name} (${r.type||'-'})`; pick.appendChild(o);});
+      } else {
+        const {data,error} = await supabase.from('procedures')
+          .select('id,title').ilike('title', `%${q}%`).order('title').limit(25);
+        if(error) return set('msg', error.message, 'err');
+        (data||[]).forEach(r=>{ const o=document.createElement('option'); o.value=r.id; o.textContent=r.title; pick.appendChild(o);});
+      }
+    }
+    $('searchInput').addEventListener('input', searchNames);
+
+    $('btnUpload').onclick = async ()=>{
+      const type  = $('attachType').value;
+      const mode  = $('conflictMode').value;
+      const id    = $('pickId').value;
+      const fname = $('docName').value.trim();
+      const notes = $('notes').value.trim();
+      const file  = $('file').files[0];
+
+      if(!id)   return set('msg','Pick a company/procedure first.','err');
+      if(!file) return set('msg','Choose a file.','err');
+
+      const base = (type==='counterparty') ? 'counterparties' : 'procedures';
+      const displayName = (fname || file.name).trim();
+      const targetName  = slugify(displayName) || slugify(file.name);
+
+      let objectPath = `${base}/${id}/${targetName}`;
+      const {data:list} = await supabase.storage.from('docs').list(`${base}/${id}`, { search: targetName });
+      const exists = (list||[]).some(x => x.name === targetName);
+      if(exists){
+        const ext  = targetName.includes('.') ? targetName.slice(targetName.lastIndexOf('.')) : '';
+        const stem = ext ? targetName.slice(0, -ext.length) : targetName;
+        const stamp = new Date().toISOString().slice(0,10);
+        if(mode==='duplicate' || mode==='append'){ objectPath = `${base}/${id}/${stem}-${stamp}${ext}`; }
+      }
+      const { error: upErr } = await supabase.storage.from('docs')
+        .upload(objectPath, file, { upsert: mode==='overwrite' });
+      if(upErr) return set('msg', 'Upload failed: '+upErr.message, 'err');
+
+      const storage_path = `docs/${objectPath}`;
+      const payload = { name: displayName, storage_path, notes: notes || null };
+      let ins;
+      if(type==='counterparty'){ payload.counterparty_id = id; ins = await supabase.from('counterparty_documents').insert(payload); }
+      else { payload.procedure_id = id; ins = await supabase.from('procedure_documents').insert(payload); }
+      if(ins.error) return set('msg','Saved file but DB insert failed: '+ins.error.message,'err');
+
+      set('msg','Uploaded and saved ✔','ok'); $('file').value='';
+    };
+
+    // =========================
+    // TAB: Add single procedure
+    // =========================
+    async function searchCompaniesForProc(){
+      const q = ($('procCompanyQuery')?.value || '').trim();
+      const pick = $('procCompanyPick'); pick.innerHTML='';
+      if(!q) return;
+      const {data,error} = await supabase.from('counterparties').select('id,name,type')
+        .ilike('name', `%${q}%`).order('name').limit(25);
+      if(error) return set('procMsg', error.message, 'err');
+      (data||[]).forEach(r=>{ const o=document.createElement('option'); o.value=r.id; o.textContent=`${r.name} (${r.type||'-'})`; pick.appendChild(o); });
+    }
+    async function searchPortsForProc(){
+      const q = ($('procPortQuery')?.value || '').trim();
+      const pick = $('procPortPick'); pick.innerHTML='';
+      if(!q) return;
+      const {data,error} = await supabase.from('ports').select('id,name,unlocode')
+        .or(`name.ilike.%${q}%,unlocode.ilike.%${q}%`).order('name').limit(25);
+      if(error) return set('procMsg', error.message, 'err');
+      (data||[]).forEach(r=>{ const o=document.createElement('option'); o.value=r.id; o.textContent=`${r.name} (${r.unlocode})`; pick.appendChild(o); });
+    }
+    $('procCompanyQuery')?.addEventListener('input', searchCompaniesForProc);
+    $('procPortQuery')?.addEventListener('input', searchPortsForProc);
+
+    $('btnSaveProc').onclick = async ()=>{
+      const companyId = $('procCompanyPick')?.value;
+      const portId    = $('procPortPick')?.value;
+      const title     = ($('procTitle')?.value || '').trim();
+      const description = ($('procDescription')?.value || '').trim() || null;
+      const steps       = ($('procSteps')?.value || '').trim() || null;
+      const reqDocs     = ($('procReqDocs')?.value || '').trim() || null;
+      const expiryRaw   = document.getElementById('procExpiry').value;
+      const notes       = ($('procNotes')?.value || '').trim() || null;
+
+      if(!companyId || !portId) return set('procMsg','Pick a company and a port','err');
+      if(!title) return set('procMsg','Enter a procedure title','err');
+
+      const payload = {
+        title,
+        port_id: portId,
+        customer_counterparty_id: companyId,
+        description,
+        steps,
+        required_documents: reqDocs,
+        expiry_date: normaliseDate(expiryRaw),
+        notes
+      };
+      const { error } = await supabase.from('procedures')
+        .upsert(payload, { onConflict: 'port_id,customer_counterparty_id,title' });
+      if(error) return set('procMsg','Error: '+error.message,'err');
+      set('procMsg','Saved ✓','ok');
+    };
+
+    // =========================
+    // TAB: Bulk CSV (upserts)
+    // =========================
+    const templates = {
+      ports: "name,country,unlocode,latitude,longitude,zone_code,notes\n" +
+             "Port Example,GB,GBLON,51.5072,-0.1276,EU-UK,Optional notes",
+      counterparties: "name,type,email,phone,notes\n" +
+                      "Atlantic Shipping,customer,ops@example.com,+44 20 1234 5678,Key customer",
+      procedures: "title,port_unlocode,company_name,steps,required_documents,expiry_date,notes\n" +
+                  "Ajman to Atlantic Shipping,AEAJM,Atlantic Shipping,\"1) Notify 48h\\n2) Submit manifest\",\"B/L, Cargo Manifest\",31.12.2027,Optional",
+      company_ports: "company_name,port_unlocode,role,notes\n" +
+                     "Atlantic Shipping,AEAJM,agent,Primary relationship",
+      unified: 'dataset,name,country,unlocode,latitude,longitude,zone_code,notes,company_name,company_type,port_unlocode,port_name,steps,required_documents,expiry_date,procedure_notes\n' +
+               'ports,Abidjan Port,CI,CIABJ,5.3167,-4.0167,AF-WA,Main Ivory Coast port,,,,,,,\n' +
+               'counterparties,Blue Whale Logistics,customer,,,,,,,,,,,,\n' +
+               'procedures,"Abidjan export — Blue Whale Logistics",,,,,,,Blue Whale Logistics,customer,CIABJ,Abidjan,"1) Notify agent\n2) File manifest","B/L, Manifest",31.12.2027,Seasonal notes\n'
+    };
+
+    const chunk = (arr, n=500) => Array.from({length: Math.ceil(arr.length/n)}, (_,i)=>arr.slice(i*n,(i+1)*n));
+    const log   = (...a)=>{ const el=$('log'); el.textContent += a.join(' ') + "\n"; };
+    function setCsvMsg(t,cls){ set('csvMsg',t,cls); }
+
+    async function preloadMaps(){
+      const maps = {};
+      const [{data:ports}, {data:companies}] = await Promise.all([
+          supabase.from('ports').select('id,unlocode,name'),
+          supabase.from('counterparties').select('id,name')
+      ]);
+      maps.portByUnlocode = new Map((ports||[]).map(r => [String(r.unlocode||'').toUpperCase(), r.id]));
+      maps.portByName     = new Map((ports||[]).map(r => [String(r.name||'').trim().toLowerCase(), r.id]));
+      maps.companyByName  = new Map((companies||[]).map(r => [String(r.name||'').trim().toLowerCase(), r.id]));
+      return maps;
+    }
+
+    async function upsertPorts(rows, mode){
+      const toNum = v => (v === '' || v == null ? null : Number(v));
+      const inRange = (n, min, max) => n == null || !isFinite(n) ? null : Math.max(min, Math.min(n, max));
+      const clean = (r) => ({
+        name:      (r.name || '').trim(),
+        country:   String(r.country || '').trim().toUpperCase() || null,
+        unlocode:  String(r.unlocode || '').trim().toUpperCase(),
+        latitude:  inRange(toNum(r.latitude),  -90,  90),
+        longitude: inRange(toNum(r.longitude), -180, 180),
+        zone_code: (r.zone_code || '').trim() || null,
+        notes:     (r.notes || '').trim() || null
+      });
+
+      const data = Array.from(
+        rows.map(clean)
+            .filter(r => r.unlocode)
+            .reduce((m, r) => m.set(r.unlocode, r), new Map())
+            .values()
+      );
+
+      if (!data.length){ log('ports: nothing to upsert'); return; }
+      for (const b of chunk(data, 500)){
+        const q = (mode === 'insert') ? supabase.from('ports').insert(b) : supabase.from('ports').upsert(b, { onConflict: 'unlocode' });
+        const { error } = await q;
+        if (error) throw new Error('ports: ' + error.message);
+        log(`ports: processed ${b.length}`);
+      }
+    }
+
+    async function upsertCompanies(rows, mode){
+      const clean = r => ({
+        name:  (r.name  || '').trim(),
+        type:  (r.type  || 'customer').trim() || 'customer',
         email: (r.email || '').trim() || null,
         phone: (r.phone || '').trim() || null,
         notes: (r.notes || '').trim() || null
       });
-    }
-    const data = Array.from(dedup.values());
-    if(!data.length){ log('companies: nothing to upsert'); return; }
 
-    const opt = { onConflict:'name' };
-    for (const b of chunk(data, 500)){
-      const q = (mode==='insert')
-        ? supabase.from('counterparties').insert(b)
-        : (mode==='update'
-            ? supabase.from('counterparties').upsert(b, {...opt, ignoreDuplicates:false})
-            : supabase.from('counterparties').upsert(b, opt));
-      const { error } = await q;
-      if (error) throw new Error('counterparties: '+error.message);
-      log(`companies: processed ${b.length}`);
-    }
-  }
+      const data = Array.from(
+        rows.map(clean)
+            .filter(r => r.name)
+            .reduce((m, r) => m.set(r.name.toLowerCase(), r), new Map())
+            .values()
+      );
 
-  // --- Procedures upsert (single dataset or unified normalised) ---
-  async function upsertProcedures(rows, mode){
-    const maps = await preloadMaps();
-    const data = [];
-
-    for (const r of rows){
-      const code  = String(r.port_unlocode || '').trim().toUpperCase();
-      const pname = String(r.port_name || '').trim().toLowerCase();
-      const portId =
-        (code && maps.portByUnlocode.get(code)) ||
-        (pname && maps.portByName.get(pname)) ||
-        null;
-      const companyId = maps.companyByName.get(String(r.company_name||'').trim().toLowerCase());
-
-      if(!portId || !companyId){
-        log(`skip: could not resolve for "${r.title||r.procedure_title||''}" (port=${r.port_unlocode||r.port_name||''}, company=${r.company_name||''})`);
-        continue;
+      if (!data.length){ log('companies: nothing to upsert'); return; }
+      for(const b of chunk(data, 500)){
+        const q = (mode==='insert') ? supabase.from('counterparties').insert(b) : supabase.from('counterparties').upsert(b, { onConflict:'name' });
+        const {error} = await q;
+        if(error) throw new Error('counterparties: '+error.message);
+        log(`companies: processed ${b.length}`);
       }
-      data.push({
-        title: (r.title || r.procedure_title || '').trim(),
-        port_id: portId,
-        customer_counterparty_id: companyId,
-        description: (r.description || '').trim() || null,
-        steps: (r.steps || '').trim() || null,
-        required_documents: (r.required_documents || '').trim() || null,
-        expiry_date: normaliseDate(r.expiry_date || ''),
-        notes: (r.procedure_notes || r.notes || '').trim() || null
-      });
     }
 
-    if(!data.length){ log('procedures: nothing to upsert'); return; }
-    const opt = { onConflict:'port_id,customer_counterparty_id,title' };
-    for (const b of chunk(data, 300)){
-      const q = (mode==='insert')
-        ? supabase.from('procedures').insert(b)
-        : (mode==='update'
-            ? supabase.from('procedures').upsert(b, {...opt, ignoreDuplicates:false})
-            : supabase.from('procedures').upsert(b, opt));
-      const { error } = await q;
-      if (error) throw new Error('procedures: '+error.message);
-      log(`procedures: processed ${b.length}`);
-    }
-  }
+    async function upsertProcedures(rows, mode, maps){
+      const data = [];
+      for (const r of rows) {
+        const title = (r.title || r.procedure_title || '').trim();
+        const companyName = (r.company_name || '').trim().toLowerCase();
+        const portCode = String(r.port_unlocode || '').trim().toUpperCase();
+        const portName = String(r.port_name || '').trim().toLowerCase();
 
-  // --- Company ↔ Port links (optional) ---
-  async function upsertCompanyPorts(rows, mode){
-    const maps = await preloadMaps();
-    const data = [];
+        const portId = (portCode && maps.portByUnlocode.get(portCode)) || (portName && maps.portByName.get(portName)) || null;
+        const companyId = maps.companyByName.get(companyName);
 
-    for (const r of rows){
-      const companyId = maps.companyByName.get(String(r.company_name || '').trim().toLowerCase());
-      const code  = String(r.port_unlocode || '').trim().toUpperCase();
-      const pname = String(r.port_name || '').trim().toLowerCase();
-      const portId =
-        (code && maps.portByUnlocode.get(code)) ||
-        (pname && maps.portByName.get(pname)) ||
-        null;
-
-      if (!companyId || !portId){
-        log(`skip: could not resolve link (company="${r.company_name||''}", port="${r.port_unlocode||r.port_name||''}")`);
-        continue;
-      }
-      data.push({
-        company_id: companyId,
-        port_id:    portId,
-        role:  (r.role  || '').trim() || null,
-        notes: (r.notes || '').trim() || null
-      });
-    }
-
-    if (!data.length){ log('company_ports: nothing to upsert'); return; }
-    const opt = { onConflict:'company_id,port_id' };
-    for (const b of chunk(data, 300)){
-      const q = (mode==='insert')
-        ? supabase.from('company_ports').insert(b)
-        : (mode==='update'
-            ? supabase.from('company_ports').upsert(b, {...opt, ignoreDuplicates:false})
-            : supabase.from('company_ports').upsert(b, opt));
-      const { error } = await q;
-      if (error) throw new Error('company_ports: ' + error.message);
-      log(`company_ports: processed ${b.length}`);
-    }
-  }
-
-  // --- Unified processor (auto-detect by columns per row) ---
-  async function processUnified(rows, mode){
-    // 0) preload current maps
-    let maps = await preloadMaps();
-
-    // 1) PORTS (only rows that look like ports, or explicit dataset=ports)
-    const portRows = rows.filter(r=>{
-      const ds = String(r.dataset||'').trim().toLowerCase();
-      const mentionsPort = String(r.port_unlocode||'').trim() || String(r.port_name||'').trim() ||
-                           r.port_country || r.port_latitude || r.port_longitude || r.port_zone_code || r.port_notes;
-      const looksProcedure = String(r.title||r.procedure_title||'').trim();
-      return (ds==='ports') || (!!mentionsPort && !looksProcedure);
-    });
-
-    // queue of new ports to upsert (enforce both code + name)
-    const newPorts = [];
-    for(const r of portRows){
-      const code  = String(r.port_unlocode || r.unlocode || '').trim().toUpperCase();
-      const name  = String(r.port_name || r.name || '').trim();
-      const resolved =
-        (code && maps.portByUnlocode.get(code)) ||
-        (name && maps.portByName.get(name.toLowerCase())) ||
-        null;
-
-      if (!resolved){
-        // NEW port: must have BOTH code + name (strict rule)
-        if(!code || !name){
-          const missing = (!code && !name) ? 'UN/LOCODE and name' : (!code ? 'UN/LOCODE' : 'name');
-          throw new Error(
-            `New port row is missing ${missing}. Provide both "port_unlocode" and "port_name" for new ports. `+
-            `Row: port_unlocode="${code||''}", port_name="${name||''}"`
-          );
+        if(!portId || !companyId || !title){
+          log(`skip procedure: could not resolve for "${title}" (port=${portCode||portName}, company=${companyName})`);
+          continue;
         }
-        newPorts.push({
-          name,
-          country: String(r.port_country||r.country||'').trim().toUpperCase() || null,
-          unlocode: code,
-          latitude: inRange(toNum(r.port_latitude), -90, 90),
-          longitude: inRange(toNum(r.port_longitude), -180, 180),
-          zone_code: String(r.port_zone_code||r.zone_code||'').trim() || null,
-          notes: String(r.port_notes||r.notes||'').trim() || null
+
+        data.push({
+          title,
+          port_id: portId,
+          customer_counterparty_id: companyId,
+          description: (r.description || '').trim() || null,
+          steps: (r.steps || '').trim() || null,
+          required_documents: (r.required_documents || '').trim() || null,
+          expiry_date: normaliseDate(r.expiry_date || ''),
+          notes: (r.procedure_notes || r.notes || '').trim() || null
         });
       }
-    }
-    if(newPorts.length){
-      // dedupe by unlocode (last wins)
-      const ded = new Map(newPorts.map(p=>[p.unlocode,p]));
-      await upsertPorts(Array.from(ded.values()), mode);
-      log(`unified: inserted/updated ${ded.size} new port(s)`);
-      maps = await preloadMaps(); // refresh
-    }else{
-      log('unified: no new ports to upsert');
-    }
 
-    // 2) COMPANIES — we allow unified rows to create/ensure companies by name (no duplicates)
-    const companyRows = rows.filter(r=>{
-      const ds = String(r.dataset||'').trim().toLowerCase();
-      return ds==='counterparties' || String(r.company_name||'').trim();
-    }).map(r=>({ name: r.company_name||r.name, type: r.company_type||r.type, email:r.email, phone:r.phone, notes:r.notes }));
-
-    if(companyRows.length){
-      await upsertCompanies(companyRows, mode);
-      log(`unified: ensured companies from CSV (${companyRows.length} rows considered)`);
-      maps = await preloadMaps();
-    }else{
-      log('unified: no company rows detected');
+      if(!data.length){ log('procedures: nothing to upsert'); return; }
+      for(const b of chunk(data, 300)){
+        const q = (mode==='insert') ? supabase.from('procedures').insert(b) : supabase.from('procedures').upsert(b, { onConflict:'port_id,customer_counterparty_id,title' });
+        const {error} = await q;
+        if(error) throw new Error('procedures: '+error.message);
+        log(`procedures: processed ${b.length}`);
+      }
     }
 
-    // 3) PROCEDURES — resolve by code or name; skip unresolved
-    const procRows = rows.filter(r=>{
-      const ds = String(r.dataset||'').trim().toLowerCase();
-      const title = String(r.title||r.procedure_title||'').trim();
-      const comp  = String(r.company_name||'').trim();
-      const portRef = String(r.port_unlocode||'').trim() || String(r.port_name||'').trim();
-      return ds==='procedures' || (title && comp && portRef);
-    }).map(r => ({
-      title:               r.title || r.procedure_title,
-      company_name:        r.company_name,
-      port_unlocode:       r.port_unlocode,
-      port_name:           r.port_name,
-      description:         r.description,
-      steps:               r.steps,
-      required_documents:  r.required_documents,
-      expiry_date:         r.expiry_date,
-      notes:               r.procedure_notes || r.notes
-    }));
-
-    if(procRows.length) await upsertProcedures(procRows, mode);
-    else log('unified: no procedure rows detected');
-
-    // 4) Company ↔ Port links — resolve by code or name; skip unresolved
-    const linkRows = rows.filter(r=>{
-      const ds = String(r.dataset||'').trim().toLowerCase();
-      return ds==='company_ports' ||
-             (String(r.company_name||'').trim() &&
-              (String(r.port_unlocode||'').trim() || String(r.port_name||'').trim()));
-    }).map(r => ({
-      company_name: r.company_name,
-      port_unlocode: r.port_unlocode,
-      port_name: r.port_name,
-      role: r.role,
-      notes: r.notes
-    }));
-
-    if(linkRows.length) await upsertCompanyPorts(linkRows, mode);
-    else log('unified: no link rows detected');
-  }
-
-  // --- CSV button handler ---
-  $('btnGo').onclick = ()=>{
-    const file = $('fileCsv').files[0];
-    const kind = $('dataset').value;
-    const mode = $('mode').value;            // upsert | insert | update
-    if(!file){ return set('csvMsg','Pick a CSV file','err'); }
-    set('csvMsg','Parsing CSV…');
-    $('log').textContent='';
-
-    Papa.parse(file, {
-      header:true,
-      skipEmptyLines:true,
-      dynamicTyping:false,
-      complete: async (res)=>{
-        const rows = res.data;
-        log(`Rows parsed: ${rows.length}`);
-        try{
-          if(kind==='unified')        await processUnified(rows, mode);
-          if(kind==='ports')          await upsertPorts(rows, mode);
-          if(kind==='counterparties') await upsertCompanies(rows, mode);
-          if(kind==='procedures')     await upsertProcedures(rows, mode);
-          if(kind==='company_ports')  await upsertCompanyPorts(rows, mode);
-          set('csvMsg','Done ✓','ok');
-        }catch(e){
-          console.error(e);
-          set('csvMsg','Error: '+e.message,'err');
+    async function upsertCompanyPorts(rows, mode, maps){
+      const data = [];
+      for (const r of rows){
+        const companyName = String(r.company_name || '').trim().toLowerCase();
+        const portCode = String(r.port_unlocode || '').trim().toUpperCase();
+        const portName = String(r.port_name || '').trim().toLowerCase();
+        const portId = (portCode && maps.portByUnlocode.get(portCode)) || (portName && maps.portByName.get(portName)) || null;
+        const companyId = maps.companyByName.get(companyName);
+        if (!companyId || !portId){
+          log(`skip link: could not resolve (company="${companyName}", port="${portCode||portName}")`);
+          continue;
         }
-      },
-      error:(e)=> set('csvMsg','CSV parse error: '+e.message,'err')
-    });
-  };
-</script>
+        data.push({
+          company_id: companyId,
+          port_id:    portId,
+          role:  (r.role  || '').trim() || null,
+          notes: (r.notes || '').trim() || null
+        });
+      }
+
+      if (!data.length){ log('company_ports: nothing to upsert'); return; }
+      for (const b of chunk(data, 300)){
+        const q = (mode === 'insert') ? supabase.from('company_ports').insert(b) : supabase.from('company_ports').upsert(b, { onConflict:'company_id,port_id' });
+        const { error } = await q;
+        if (error) throw new Error('company_ports: ' + error.message);
+        log(`company_ports: processed ${b.length}`);
+      }
+    }
+    
+    // --- CORRECTED Unified processor ---
+    async function processUnified(rows, mode){
+        let maps = await preloadMaps();
+
+        // 1. First pass: Validate and collect all NEW entities
+        const newPorts = new Map();
+        const newCompanies = new Map();
+        
+        for (const r of rows) {
+            // Check for new ports
+            const portCode = (r.port_unlocode || '').trim().toUpperCase();
+            const portName = (r.port_name || '').trim();
+            const isExistingPort = maps.portByUnlocode.has(portCode) || maps.portByName.has(portName.toLowerCase());
+
+            if ((portCode || portName) && !isExistingPort) {
+                // This is a NEW port. It MUST have both name and code.
+                if (!portName || !portCode) {
+                    throw new Error(`New port row is missing UN/LOCODE and/or name. Provide both "port_unlocode" and "port_name". Row: port_unlocode="${portCode}", port_name="${portName}"`);
+                }
+                newPorts.set(portCode, {
+                    name: portName,
+                    unlocode: portCode,
+                    country: (r.country || '').trim().toUpperCase() || null,
+                    latitude: r.latitude,
+                    longitude: r.longitude,
+                    zone_code: (r.zone_code || '').trim() || null,
+                    notes: (r.port_notes || r.notes || '').trim() || null
+                });
+            }
+
+            // Check for new companies
+            const companyName = (r.company_name || r.name || '').trim();
+            if (companyName && !maps.companyByName.has(companyName.toLowerCase())) {
+                newCompanies.set(companyName.toLowerCase(), {
+                    name: companyName,
+                    type: (r.company_type || r.type || 'customer').trim() || 'customer',
+                    email: (r.email || '').trim() || null,
+                    phone: (r.phone || '').trim() || null,
+                    notes: (r.notes || '').trim() || null
+                });
+            }
+        }
+
+        // 2. Upsert new entities: ports first, then companies
+        const newPortsData = Array.from(newPorts.values());
+        if(newPortsData.length) {
+            log(`unified: found ${newPortsData.length} new port(s) to create.`);
+            await upsertPorts(newPortsData, mode);
+        } else {
+            log(`unified: no new ports detected.`);
+        }
+        
+        const newCompaniesData = Array.from(newCompanies.values());
+        if(newCompaniesData.length) {
+            log(`unified: found ${newCompaniesData.length} new company/companies to create.`);
+            await upsertCompanies(newCompaniesData, mode);
+        } else {
+            log(`unified: no new companies detected.`);
+        }
+        
+        // 3. If we added anything, refresh the maps before proceeding
+        if (newPortsData.length || newCompaniesData.length) {
+            log('unified: refreshing maps after new inserts...');
+            maps = await preloadMaps();
+        }
+
+        // 4. Now, process dependent entities: procedures and links
+        const procedureRows = rows.filter(r => (r.title || r.procedure_title) && r.company_name && (r.port_unlocode || r.port_name));
+        if (procedureRows.length) await upsertProcedures(procedureRows, mode, maps);
+        else log('unified: no procedure rows detected');
+
+        const companyPortRows = rows.filter(r => r.company_name && (r.port_unlocode || r.port_name));
+        if (companyPortRows.length) await upsertCompanyPorts(companyPortRows, mode, maps);
+        else log('unified: no company-port link rows detected');
+    }
+
+    $('dlTemplate').onclick = (e)=>{
+      e.preventDefault();
+      const kind = $('dataset').value;
+      const blob = new Blob([templates[kind]], {type:'text/csv;charset=utf-8'});
+      const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
+      a.download = kind + ".csv"; a.click();
+    };
+
+    $('btnGo').onclick = ()=>{
+      const file = $('fileCsv').files[0];
+      const kind = $('dataset').value;
+      const mode = $('mode').value;
+      if(!file){ return setCsvMsg('Pick a CSV file','err'); }
+      setCsvMsg('Parsing CSV…');
+      $('log').textContent='';
+
+      Papa.parse(file, {
+        header:true,
+        skipEmptyLines:true,
+        dynamicTyping:false,
+        complete: async (res)=>{
+          const rows = res.data;
+          log(`Rows parsed: ${rows.length}`);
+          try{
+            const maps = kind !== 'unified' ? await preloadMaps() : null;
+            if(kind==='unified')        await processUnified(rows, mode);
+            if(kind==='ports')          await upsertPorts(rows, mode);
+            if(kind==='counterparties') await upsertCompanies(rows, mode);
+            if(kind==='procedures')     await upsertProcedures(rows, mode, maps);
+            if(kind==='company_ports')  await upsertCompanyPorts(rows, mode, maps);
+            setCsvMsg('Done ✓','ok');
+          }catch(e){
+            console.error(e);
+            setCsvMsg('Error: '+e.message,'err');
+          }
+        },
+        error:(e)=> setCsvMsg('CSV parse error: '+e.message,'err')
+      });
+    };
+  </script>
+</body>
+</html>
