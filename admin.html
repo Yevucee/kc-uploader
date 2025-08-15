@@ -353,7 +353,7 @@
           supabase.from('ports').select('id,unlocode,name'),
           supabase.from('counterparties').select('id,name')
       ]);
-      maps.portByUnlocode = new Map((ports||[]).map(r => [String(r.unlocode||'').toUpperCase(), r.id]));
+      maps.portByUnlocode = new Map((ports||[]).map(r => [String(r.unlocode||'').trim().toUpperCase(), r.id]));
       maps.portByName     = new Map((ports||[]).map(r => [String(r.name||'').trim().toLowerCase(), r.id]));
       maps.companyByName  = new Map((companies||[]).map(r => [String(r.name||'').trim().toLowerCase(), r.id]));
       return maps;
