@@ -559,6 +559,7 @@ async function upsertCompanyPorts(rows, mode){
     log(`company_ports: processed ${b.length}`);
   }
 }
+
 // --- 7) Unified processor (auto-detect by columns per row) ---
 async function processUnified(rows, mode){
   const maps = await preloadMaps();
@@ -578,8 +579,19 @@ async function processUnified(rows, mode){
       (pname && maps.portByName.get(pname)) ||
       null;
 
-    
-      // Looks like a valid new port row -> queue it for ports upsert
+    if (!resolvedId){
+      // NEW port: require BOTH code and name
+      const hasName = !!pname;
+      const hasCode = !!code;
+      if (!hasName || !hasCode){
+        const missing = !hasName && !hasCode ? 'UN/LOCODE and name'
+                       : (!hasCode ? 'UN/LOCODE' : 'name');
+        throw new Error(
+          `New port row is missing ${missing}. ` +
+          `Provide both "port_unlocode" and "port_name" for new ports. ` +
+          `Row: port_unlocode="${r.port_unlocode||''}", port_name="${r.port_name||''}"`
+        );
+      }
       newPortRows.push({
         name:       String(r.port_name||'').trim(),
         country:    String(r.port_country||r.country||'').trim().toUpperCase() || null,
@@ -593,40 +605,17 @@ async function processUnified(rows, mode){
   }
 
   if (newPortRows.length){
-    // Deduplicate new ports by code (last wins)
-    const dedup = new Map(newPortRows.map(p => [p.unlocode, p]));
+    const dedup = new Map(newPortRows.map(p => [p.unlocode, p])); // last wins
     await upsertPorts(Array.from(dedup.values()), mode);
     log(`unified: inserted/updated ${dedup.size} new port(s)`);
   } else {
     log('unified: no new ports to upsert');
   }
 
-   // 7b) COMPANIES — ensure referenced companies exist
-  const companyNames = Array.from(new Set(
-    rows
-      .map(r => String(r.company_name || '').trim())
-      .filter(Boolean)
-      .map(n => n.toLowerCase())
-  ));
-
-  const missingCompanies = companyNames
-    .filter(n => !maps.companyByName.get(n))
-    .map(n => ({
-      name: n.replace(/\b\w/g, c => c.toUpperCase()), // simple title-case
-      type: 'customer',
-      email: null,
-      phone: null,
-      notes: 'Auto-created via Unified CSV'
-    }));
-
-  if (missingCompanies.length){
-    await upsertCompanies(missingCompanies, mode);
-    log(`unified: inserted/updated ${missingCompanies.length} compan(ies)`);
-    // refresh maps so procedure/link resolution sees new company IDs
-    Object.assign(maps, await preloadMaps());
-  } else {
-    log('unified: no new companies to upsert');
-  }
+  // 7b) COMPANIES (requires name)
+  const rowsForCompanies = rows.filter(r => (r.company_name||'').trim());
+  if (rowsForCompanies.length) await upsertCompanies(rowsForCompanies, mode);
+  else log('unified: no company rows detected');
 
   // 7c) PROCEDURES (need title + at least one of port_unlocode/port_name + company_name)
   const rowsForProcedures = rows.filter(r =>
@@ -634,7 +623,6 @@ async function processUnified(rows, mode){
     ((String(r.port_unlocode||'').trim()) || (String(r.port_name||'').trim())) &&
     (String(r.company_name||'').trim())
   ).map(r => ({
-    // normalize field names for the procedure upsert
     title:               String(r.title||r.procedure_title||'').trim(),
     port_unlocode:       r.port_unlocode || '',
     port_name:           r.port_name || '',
@@ -649,16 +637,15 @@ async function processUnified(rows, mode){
   if (rowsForProcedures.length) await upsertProcedures(rowsForProcedures, mode);
   else log('unified: no procedure rows detected');
 
-// 7d) Optional company↔port links (if you use that table)
-const rowsForLinks = rows.filter(r =>
-  (String(r.company_name||'').trim()) &&
-  ((String(r.port_unlocode||'').trim()) || (String(r.port_name||'').trim()))
-);
-if (rowsForLinks.length && typeof upsertCompanyPorts === 'function'){
-  await upsertCompanyPorts(rowsForLinks, mode);
-}
-}
-
+  // 7d) Optional company↔port links (if you use that table)
+  const rowsForLinks = rows.filter(r =>
+    (String(r.company_name||'').trim()) &&
+    ((String(r.port_unlocode||'').trim()) || (String(r.port_name||'').trim()))
+  );
+  if (rowsForLinks.length && typeof upsertCompanyPorts === 'function'){
+    await upsertCompanyPorts(rowsForLinks, mode);
+  }
+} // <-- closes processUnified
 // --- 8) “Download template” link ---
 $('dlTemplate').onclick = (e)=>{
   e.preventDefault();
