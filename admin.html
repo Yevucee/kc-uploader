@@ -193,30 +193,6 @@
     const $ = id => document.getElementById(id);
     const set = (id, text, cls)=>{ const el=$(id); if(!el) return; el.className=cls||''; el.textContent=text; };
 
-// Runs ports + companies + procedures in one pass.
-// Rows may have only port fields, only company fields, only procedure fields, or any combo.
-  }
-
-  // Next, upsert companies (only rows with a company_name)
-  const rowsForCompanies = rows.filter(r => (r.company_name||'').trim());
-  if (rowsForCompanies.length) {
-    await upsertCompanies(rowsForCompanies, mode);
-  } else {
-    log('unified: no company rows detected');
-  }
-
-  // Finally, upsert procedures (need port_unlocode + company_name + procedure_title)
-  const rowsForProcedures = rows.filter(r =>
-    (r.procedure_title||'').trim() &&
-    (r.port_unlocode||'').trim() &&
-    (r.company_name||'').trim()
-  );
-  if (rowsForProcedures.length) {
-    await upsertProcedures(rowsForProcedures, mode);
-  } else {
-    log('unified: no resolvable procedure rows detected');
-  }
-}
     
     function normaliseDate(s) {
   if (!s) return null;
