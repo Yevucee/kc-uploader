@@ -649,14 +649,14 @@ async function processUnified(rows, mode){
   if (rowsForProcedures.length) await upsertProcedures(rowsForProcedures, mode);
   else log('unified: no procedure rows detected');
 
-  // 7d) Optional company↔port links (if you use that table)
-  const rowsForLinks = rows.filter(r =>
-    (String(r.company_name||'').trim()) &&
-    ((String(r.port_unlocode||'').trim()) || (String(r.port_name||'').trim()))
-  );
-  if (rowsForLinks.length && typeof upsertCompanyPorts === 'function'){
-    await upsertCompanyPorts(rowsForLinks, mode);
-  }
+// 7d) Optional company↔port links (if you use that table)
+const rowsForLinks = rows.filter(r =>
+  (String(r.company_name||'').trim()) &&
+  ((String(r.port_unlocode||'').trim()) || (String(r.port_name||'').trim()))
+);
+if (rowsForLinks.length && typeof upsertCompanyPorts === 'function'){
+  await upsertCompanyPorts(rowsForLinks, mode);
+}
 }
 
 // --- 8) “Download template” link ---
