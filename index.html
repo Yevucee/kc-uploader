@@ -15,8 +15,8 @@
     label{font-weight:600;margin-top:8px;display:block}
     .muted{opacity:.75}.ok{color:#117a2e}.err{color:#b00020}.small{font-size:.9rem}
   </style>
-  <!-- Supabase JS v2 (global is window.supabase) -->
-  <script src="https://unpkg.com/@supabase/supabase-js@2" defer></script>
+  <!-- Load the UMD build so window.supabase exists -->
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js" defer></script>
 </head>
 <body>
   <h1>Upload a document</h1>
@@ -28,8 +28,7 @@
       <button id="btnLogin">Send sign-in link</button>
     </div>
     <p class="muted small">
-      You’ll receive a magic link; open it on this device. Make sure this page URL is allowed in
-      Supabase → Authentication → URL configuration (Site URL & Redirect URLs).
+      You’ll receive a magic link; open it on this device.
     </p>
     <p id="authMsg"></p>
   </div>
@@ -74,7 +73,7 @@
   </div>
 
   <script>
-    // Wait until the Supabase script has actually loaded
+    // Run after the UMD script has loaded
     window.addEventListener('DOMContentLoaded', () => {
       if (!window.supabase || !window.supabase.createClient) {
         document.getElementById('authMsg').textContent =
@@ -87,12 +86,13 @@
         "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBhand1ZnNpenJtd2tqdmV5d3loIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTQ5MjEyNjIsImV4cCI6MjA3MDQ5NzI2Mn0.atSQj2ekJo_fePOOhMjbzRav98a7nX-TQY3NgsFXk98"
       );
 
-      // Bind buttons after DOM is ready
+      // Bind UI handlers
       document.getElementById('btnLogin').addEventListener('click', login);
       document.getElementById('btnUpload').addEventListener('click', doUpload);
       document.getElementById('attachType').addEventListener('change', resetPicker);
       document.getElementById('searchInput').addEventListener('input', searchNames);
 
+      /* --- Auth (magic link) --- */
       async function login(){
         const email = document.getElementById('email').value.trim();
         if(!email){ setMsg('authMsg','Enter an email','err'); return; }
@@ -107,10 +107,12 @@
         document.getElementById('uploader').style.display = session ? 'block' : 'none';
       });
 
+      /* --- Helpers --- */
       function setMsg(id, text, cls){ const el=document.getElementById(id); el.className=cls||''; el.textContent=text; }
       function slugify(s){ return (s||'').toLowerCase().replace(/\s+/g,'_').replace(/[^\w\-.]/g,''); }
       function resetPicker(){ document.getElementById('pickId').innerHTML=''; document.getElementById('searchInput').value=''; }
 
+      /* --- Search by name --- */
       async function searchNames(){
         const type = document.getElementById('attachType').value;
         const q = document.getElementById('searchInput').value.trim();
@@ -120,19 +122,26 @@
 
         if(type === 'counterparty'){
           const { data, error } = await supabase
-            .from('counterparties').select('id,name,type')
-            .ilike('name', `%${q}%`).order('name').limit(25);
+            .from('counterparties')
+            .select('id,name,type')
+            .ilike('name', `%${q}%`)
+            .order('name')
+            .limit(25);
           if(error) return setMsg('msg', error.message, 'err');
           data.forEach(r => { const o=document.createElement('option'); o.value=r.id; o.textContent=`${r.name} (${r.type})`; pick.appendChild(o); });
         } else {
           const { data, error } = await supabase
-            .from('procedures').select('id,title')
-            .ilike('title', `%${q}%`).order('title').limit(25);
+            .from('procedures')
+            .select('id,title')
+            .ilike('title', `%${q}%`)
+            .order('title')
+            .limit(25);
           if(error) return setMsg('msg', error.message, 'err');
           data.forEach(r => { const o=document.createElement('option'); o.value=r.id; o.textContent=r.title; pick.appendChild(o); });
         }
       }
 
+      /* --- Upload + metadata insert --- */
       async function doUpload(){
         const type  = document.getElementById('attachType').value;
         const mode  = document.getElementById('conflictMode').value;
@@ -149,6 +158,7 @@
         const displayName = (fname || file.name).trim();
         const targetName  = slugify(displayName) || slugify(file.name);
 
+        // Pick storage path with conflict handling
         let objectPath = `${base}/${id}/${targetName}`;
         const { data:list } = await supabase.storage.from('docs').list(`${base}/${id}`, { search: targetName });
         const exists = (list || []).some(x => x.name === targetName);
@@ -157,12 +167,15 @@
           const stem = ext ? targetName.slice(0, -ext.length) : targetName;
           const stamp = new Date().toISOString().slice(0,10);
           if(mode==='duplicate' || mode==='append'){ objectPath = `${base}/${id}/${stem}-${stamp}${ext}`; }
+          // overwrite keeps the same name
         }
 
+        // Upload file
         const { error: upErr } = await supabase.storage.from('docs')
           .upload(objectPath, file, { upsert: mode==='overwrite' });
         if(upErr){ msg.innerHTML = `<span class="err">Upload failed: ${upErr.message}</span>`; return; }
 
+        // Insert metadata
         const storage_path = `docs/${objectPath}`;
         const payload = { name: displayName, storage_path, notes: notes || null };
         let ins;
