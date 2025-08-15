@@ -16,6 +16,30 @@
     .muted{opacity:.75}.ok{color:#117a2e}.err{color:#b00020}.small{font-size:.9rem}
   </style>
 </head>
+  <script>
+  function safeLogin(){
+    const out = document.getElementById('authMsg');
+    try {
+      const email = (document.getElementById('email')?.value || '').trim();
+      if (!email) { out.className='err'; out.textContent='Enter an email'; return; }
+      if (!window.supabaseClient) { out.className='err'; out.textContent='Supabase not ready'; return; }
+
+      window.supabaseClient.auth.signInWithOtp({
+        email,
+        options: { emailRedirectTo: window.location.href }
+      }).then(({ error }) => {
+        out.className = error ? 'err' : 'ok';
+        out.textContent = error ? `Error: ${error.message}` : 'Link sent. Open it on this device.';
+      }).catch((e)=>{
+        out.className='err'; out.textContent='Login error: ' + e.message;
+        console.error(e);
+      });
+    } catch(e){
+      out.className='err'; out.textContent='Login script error';
+      console.error(e);
+    }
+  }
+</script>
 <body>
   <h1>Upload a document</h1>
 
