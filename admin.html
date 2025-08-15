@@ -615,10 +615,32 @@ async function processUnified(rows, mode){
     log('unified: no new ports to upsert');
   }
 
-  // 7b) COMPANIES (requires name)
-  const rowsForCompanies = rows.filter(r => (r.company_name||'').trim());
-  if (rowsForCompanies.length) await upsertCompanies(rowsForCompanies, mode);
-  else log('unified: no company rows detected');
+   // 7b) COMPANIES — ensure referenced companies exist
+  const companyNames = Array.from(new Set(
+    rows
+      .map(r => String(r.company_name || '').trim())
+      .filter(Boolean)
+      .map(n => n.toLowerCase())
+  ));
+
+  const missingCompanies = companyNames
+    .filter(n => !maps.companyByName.get(n))
+    .map(n => ({
+      name: n.replace(/\b\w/g, c => c.toUpperCase()), // simple title-case
+      type: 'customer',
+      email: null,
+      phone: null,
+      notes: 'Auto-created via Unified CSV'
+    }));
+
+  if (missingCompanies.length){
+    await upsertCompanies(missingCompanies, mode);
+    log(`unified: inserted/updated ${missingCompanies.length} compan(ies)`);
+    // refresh maps so procedure/link resolution sees new company IDs
+    Object.assign(maps, await preloadMaps());
+  } else {
+    log('unified: no new companies to upsert');
+  }
 
   // 7c) PROCEDURES (need title + at least one of port_unlocode/port_name + company_name)
   const rowsForProcedures = rows.filter(r =>
