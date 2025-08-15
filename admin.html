@@ -569,18 +569,41 @@ async function processUnified(rows, mode){
     String(r.port_unlocode||'').trim() || String(r.port_name||'').trim()
   );
 
-  const newPortRows = [];
   for (const r of rowsMentioningPorts){
-    const code  = String(r.port_unlocode||'').trim().toUpperCase();
-    const pname = String(r.port_name||'').trim().toLowerCase();
+  const codeRaw  = (r.port_unlocode ?? '').toString();
+  const nameRaw  = (r.port_name ?? '').toString();
 
-    const resolvedId =
-      (code  && maps.portByUnlocode.get(code)) ||
-      (pname && maps.portByName.get(pname)) ||
-      null;
+  const code  = codeRaw.trim().toUpperCase();
+  const pname = nameRaw.trim().toLowerCase();
 
-      if (!resolvedId) {
-    // New port — enforce BOTH name and code
+  // Robust map lookups
+  const byCode = code && maps.portByUnlocode.has(code)
+    ? maps.portByUnlocode.get(code)
+    : null;
+  const byName = pname && maps.portByName.has(pname)
+    ? maps.portByName.get(pname)
+    : null;
+
+  const resolvedId = byCode || byName || null;
+
+  // Heuristic: is this row actually trying to CREATE a port?
+  // (has any port-ish fields beyond just referencing it in a procedure)
+  const looksLikePortRow =
+    !!(pname || code || r.port_country || r.port_latitude || r.port_longitude || r.port_zone_code || r.port_notes);
+
+  // Heuristic: looks like a procedure reference (has title/company)
+  const looksLikeProcedureRef =
+    !!( (r.title || r.procedure_title || '').toString().trim() &&
+        (r.company_name || '').toString().trim() );
+
+  if (!resolvedId) {
+    if (looksLikeProcedureRef) {
+      // This is a procedure referencing a port we couldn't resolve yet.
+      // Don't hard-fail here; the procedure phase will log a skip if still unresolved.
+      continue;
+    }
+
+    // This is a genuine "port" row -> enforce BOTH code AND name.
     const hasName = !!pname;
     const hasCode = !!code;
     if (!hasName || !hasCode) {
@@ -590,22 +613,25 @@ async function processUnified(rows, mode){
       throw new Error(
         `New port row is missing ${missing}. ` +
         `Provide both "port_unlocode" and "port_name" for new ports. ` +
-        `Row: port_unlocode="${r.port_unlocode||''}", port_name="${r.port_name||''}"`
+        `Row: port_unlocode="${codeRaw}", port_name="${nameRaw}"`
       );
     }
+  }
 
-    // Queue this truly-new port for upsert (dedup later on unlocode)
+  // If it reaches here with both name+code and still unresolved, it’s a valid NEW port.
+  // Queue for upsert (dedup later on unlocode).
+  if (!resolvedId && looksLikePortRow) {
     newPortRows.push({
-      name:       String(r.port_name||'').trim(),
-      country:    String(r.port_country||r.country||'').trim().toUpperCase() || null,
+      name:       (r.port_name || '').toString().trim(),
+      country:    (r.port_country || r.country || '').toString().trim().toUpperCase() || null,
       unlocode:   code,
       latitude:   r.port_latitude,
       longitude:  r.port_longitude,
-      zone_code:  String(r.port_zone_code||r.zone_code||'').trim() || null,
-      notes:      String(r.port_notes||'').trim() || null
+      zone_code:  (r.port_zone_code || r.zone_code || '').toString().trim() || null,
+      notes:      (r.port_notes || '').toString().trim() || null
     });
   }
-  }
+} // end for rowsMentioningPorts
   
   // Otherwise: resolvedId exists → existing port; do nothing here
   if (newPortRows.length){
