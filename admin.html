@@ -195,13 +195,6 @@
 
 // Runs ports + companies + procedures in one pass.
 // Rows may have only port fields, only company fields, only procedure fields, or any combo.
-async function processUnified(rows, mode){
-  // First, upsert ports (only rows with a UN/LOCODE)
-  const rowsForPorts = rows.filter(r => (r.port_unlocode||'').trim());
-  if (rowsForPorts.length) {
-    await upsertPorts(rowsForPorts, mode);
-  } else {
-    log('unified: no port rows detected');
   }
 
   // Next, upsert companies (only rows with a company_name)
