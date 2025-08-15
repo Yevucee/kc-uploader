@@ -547,21 +547,6 @@ async function upsertCompanyPorts(rows, mode){
 
   if (!data.length){ log('company_ports: nothing to upsert'); return; }
 
-  const opt = { onConflict:'company_id,port_id' };
-  for (const b of chunk(data, 300)){
-    const { error } = await (
-      mode === 'insert'
-        ? supabase.from('company_ports').insert(b)
-        : supabase.from('company_ports').upsert(b, opt)
-    );
-    if (error) throw new Error('company_ports: ' + error.message);
-    log(`company_ports: processed ${b.length}`);
-  }
-}
-
-
-  if (!data.length){ log('company_ports: nothing to upsert'); return; }
-
   // Adjust table/key if yours differs (assumes unique(company_id,port_id))
   const opt = { onConflict:'company_id,port_id' };
   for (const b of chunk(data, 300)){
@@ -574,7 +559,6 @@ async function upsertCompanyPorts(rows, mode){
     log(`company_ports: processed ${b.length}`);
   }
 }
-
 // --- 7) Unified processor (auto-detect by columns per row) ---
 async function processUnified(rows, mode){
   const maps = await preloadMaps();
