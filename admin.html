@@ -579,31 +579,33 @@ async function processUnified(rows, mode){
       (pname && maps.portByName.get(pname)) ||
       null;
 
-    if (!resolvedId){
-      // NEW port: require BOTH code and name
-      const hasName = !!pname;
-      const hasCode = !!code;
-      if (!hasName || !hasCode){
-        const missing = !hasName && !hasCode ? 'UN/LOCODE and name'
-                       : (!hasCode ? 'UN/LOCODE' : 'name');
-        throw new Error(
-          `New port row is missing ${missing}. ` +
-          `Provide both "port_unlocode" and "port_name" for new ports. ` +
-          `Row: port_unlocode="${r.port_unlocode||''}", port_name="${r.port_name||''}"`
-        );
-      }
-      newPortRows.push({
-        name:       String(r.port_name||'').trim(),
-        country:    String(r.port_country||r.country||'').trim().toUpperCase() || null,
-        unlocode:   code,
-        latitude:   r.port_latitude,
-        longitude:  r.port_longitude,
-        zone_code:  String(r.port_zone_code||r.zone_code||'').trim() || null,
-        notes:      String(r.port_notes||'').trim() || null
-      });
+      if (!resolvedId) {
+    // New port — enforce BOTH name and code
+    const hasName = !!pname;
+    const hasCode = !!code;
+    if (!hasName || !hasCode) {
+      const missing = !hasName && !hasCode
+        ? 'UN/LOCODE and name'
+        : (!hasCode ? 'UN/LOCODE' : 'name');
+      throw new Error(
+        `New port row is missing ${missing}. ` +
+        `Provide both "port_unlocode" and "port_name" for new ports. ` +
+        `Row: port_unlocode="${r.port_unlocode||''}", port_name="${r.port_name||''}"`
+      );
     }
-  }
 
+    // Queue this truly-new port for upsert (dedup later on unlocode)
+    newPortRows.push({
+      name:       String(r.port_name||'').trim(),
+      country:    String(r.port_country||r.country||'').trim().toUpperCase() || null,
+      unlocode:   code,
+      latitude:   r.port_latitude,
+      longitude:  r.port_longitude,
+      zone_code:  String(r.port_zone_code||r.zone_code||'').trim() || null,
+      notes:      String(r.port_notes||'').trim() || null
+    });
+  }
+  // Otherwise: resolvedId exists → existing port; do nothing here
   if (newPortRows.length){
     const dedup = new Map(newPortRows.map(p => [p.unlocode, p])); // last wins
     await upsertPorts(Array.from(dedup.values()), mode);
