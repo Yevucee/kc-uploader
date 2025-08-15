@@ -541,29 +541,77 @@ async function upsertCompanyPorts(rows, mode){
 
 // --- 7) Unified processor (auto-detect by columns per row) ---
 async function processUnified(rows, mode){
-  // Ports first (requires port_unlocode)
-  const rowsForPorts = rows.filter(r => (r.port_unlocode||'').trim());
-  if (rowsForPorts.length) await upsertPorts(rowsForPorts, mode);
-  else log('unified: no port rows detected');
+  const ds = v => String(v || '').trim().toLowerCase();
 
-  // Companies (requires company_name)
-  const rowsForCompanies = rows.filter(r => (r.company_name||'').trim());
-  if (rowsForCompanies.length) await upsertCompanies(rowsForCompanies, mode);
-  else log('unified: no company rows detected');
+  // 1) PORTS
+  const portRows = rows.filter(r => ds(r.dataset) === 'ports');
+  if (portRows.length) {
+    await upsertPorts(
+      portRows.map(r => ({
+        name:       r.port_name       ?? r.name,
+        country:    r.port_country    ?? r.country,
+        unlocode:   r.port_unlocode   ?? r.unlocode,
+        latitude:   r.port_latitude   ?? r.latitude,
+        longitude:  r.port_longitude  ?? r.longitude,
+        zone_code:  r.port_zone_code  ?? r.zone_code,
+        notes:      r.port_notes      ?? r.notes
+      })),
+      mode
+    );
+  } else {
+    log('unified: no port rows detected');
+  }
 
-  // Procedures (requires title + port_unlocode + company_name)
-  const rowsForProcedures = rows.filter(r =>
-    (r.title||'').trim() && (r.port_unlocode||'').trim() && (r.company_name||'').trim()
+  // 2) COMPANIES (counterparties)
+  const companyRows = rows.filter(
+    r => ['counterparties','companies','company'].includes(ds(r.dataset))
   );
-  if (rowsForProcedures.length) await upsertProcedures(rowsForProcedures, mode);
-  else log('unified: no procedure rows detected');
+  if (companyRows.length) {
+    await upsertCompanies(
+      companyRows.map(r => ({
+        name:  r.company_name  ?? r.name,
+        type:  r.company_type  ?? r.type  ?? null,
+        email: r.company_email ?? r.email ?? null,
+        phone: r.company_phone ?? r.phone ?? null,
+        notes: r.company_notes ?? r.notes ?? null
+      })),
+      mode
+    );
+  } else {
+    log('unified: no company rows detected');
+  }
 
-  // Optional link rows (company_name + port_unlocode)
-  const rowsForLinks = rows.filter(r =>
-    (r.company_name||'').trim() && (r.port_unlocode||'').trim()
-  );
-  if (rowsForLinks.length && typeof upsertCompanyPorts === 'function'){
-    await upsertCompanyPorts(rowsForLinks, mode);
+  // 3) PROCEDURES
+  const procRows = rows.filter(r => ds(r.dataset) === 'procedures');
+  if (procRows.length) {
+    await upsertProcedures(
+      procRows.map(r => ({
+        title:               r.procedure_title ?? r.title ?? r.name,  // accept any
+        port_unlocode:       r.port_unlocode,
+        company_name:        r.company_name,
+        steps:               r.procedure_steps ?? r.steps ?? null,
+        required_documents:  r.procedure_required_documents ?? r.required_documents ?? null,
+        expiry_date:         r.procedure_expiry_date ?? r.expiry_date ?? null,
+        notes:               r.procedure_notes ?? r.notes ?? null
+      })),
+      mode
+    );
+  } else {
+    log('unified: no procedure rows detected');
+  }
+
+  // 4) OPTIONAL: company ↔ port links
+  const linkRows = rows.filter(r => ds(r.dataset) === 'company_ports');
+  if (linkRows.length && typeof upsertCompanyPorts === 'function') {
+    await upsertCompanyPorts(
+      linkRows.map(r => ({
+        company_name: r.company_name ?? r.name,
+        port_unlocode: r.port_unlocode,
+        role:  r.role  ?? null,
+        notes: r.notes ?? null
+      })),
+      mode
+    );
   }
 }
 
