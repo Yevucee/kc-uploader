@@ -605,6 +605,8 @@ async function processUnified(rows, mode){
       notes:      String(r.port_notes||'').trim() || null
     });
   }
+  }
+  
   // Otherwise: resolvedId exists → existing port; do nothing here
   if (newPortRows.length){
     const dedup = new Map(newPortRows.map(p => [p.unlocode, p])); // last wins
