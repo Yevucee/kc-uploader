@@ -190,6 +190,17 @@
     const $ = id => document.getElementById(id);
     const set = (id, text, cls)=>{ const el=$(id); if(!el) return; el.className=cls||''; el.textContent=text; };
 
+    function normaliseDate(s) {
+  if (!s) return null;
+  s = s.trim();
+  // Already ISO (YYYY-MM-DD)?
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+  // DD.MM.YYYY → YYYY-MM-DD
+  const m = s.match(/^(\d{2})\.(\d{2})\.(\d{4})$/);
+  if (m) return `${m[3]}-${m[2]}-${m[1]}`;
+  return null; // anything else -> treat as empty
+}
+
     // ----- Auth (magic link)
     $('btnLogin').onclick = async () => {
       const email = $('email').value.trim();
@@ -314,16 +325,22 @@
       const description = ($('procDescription')?.value || '').trim() || null;
       const steps       = ($('procSteps')?.value || '').trim() || null;
       const reqDocs     = ($('procReqDocs')?.value || '').trim() || null;
-      const expiry      = $('procExpiry')?.value || null;
+      const expiryRaw = document.getElementById('procExpiry').value;
       const notes       = ($('procNotes')?.value || '').trim() || null;
 
       if(!companyId || !portId) return set('procMsg','Pick a company and a port','err');
       if(!title) return set('procMsg','Enter a procedure title','err');
 
       const payload = {
-        title, port_id: portId, customer_counterparty_id: companyId,
-        description, steps, required_documents: reqDocs, expiry_date: expiry, notes
-      };
+  title,
+  port_id: portId,
+  customer_counterparty_id: companyId,
+  description,
+  steps,
+  required_documents: reqDocs,
+  expiry_date: normaliseDate(expiryRaw),   // <-- now accepts DD.MM.YYYY or ISO
+  notes
+};
       const { error } = await supabase.from('procedures')
         .upsert(payload, { onConflict: 'port_id,customer_counterparty_id,title' });
       if(error) return set('procMsg','Error: '+error.message,'err');
@@ -361,22 +378,56 @@
     }
 
     async function upsertPorts(rows, mode){
-      const data = rows.map(r=>({
-        name:(r.name||'').trim(), country:(r.country||'').trim(),
-        unlocode:(r.unlocode||'').trim(),
-        latitude:num(r.latitude), longitude:num(r.longitude),
-        zone_code:(r.zone_code||'').trim()||null,
-        notes:(r.notes||'').trim()||null
-      })).filter(r=>r.unlocode);
-      const opt = { onConflict:'unlocode' };
-      for(const b of chunk(data, 500)){
-        const {error} = await (mode==='insert'
-          ? supabase.from('ports').insert(b)
-          : supabase.from('ports').upsert(b, opt));
-        if(error) throw new Error('ports: '+error.message);
-        log(`ports: processed ${b.length}`);
-      }
-    }
+  // small helpers local to this function
+  const toNum = v => (v === '' || v == null ? null : Number(v));
+  const inRange = (n, min, max) =>
+    n == null ? null : (isFinite(n) && n >= min && n <= max ? n : null);
+
+  // normalise a single CSV row -> DB payload, or null if not usable
+  const clean = (r) => {
+    const unlocode = String(r.unlocode || '').trim().toUpperCase();
+    if (!unlocode) return null; // must have UN/LOCODE
+
+    const name = (r.name || '').trim();
+    const country = String(r.country || '').trim().toUpperCase() || null;
+
+    // coerce and range-check
+    const lat = inRange(toNum(r.latitude), -90, 90);
+    const lon = inRange(toNum(r.longitude), -180, 180);
+
+    return {
+      name,
+      country,
+      unlocode,
+      latitude: lat,
+      longitude: lon,
+      zone_code: (r.zone_code || '').trim() || null,
+      notes: (r.notes || '').trim() || null
+    };
+  };
+
+  // Map + dedupe by UN/LOCODE (last occurrence in the CSV wins)
+  const dedup = new Map();
+  for (const r of rows) {
+    const c = clean(r);
+    if (!c) continue;
+    dedup.set(c.unlocode, c);
+  }
+  const data = Array.from(dedup.values());
+  if (!data.length) { log('ports: nothing to upsert'); return; }
+
+  const opt = { onConflict: 'unlocode' };
+
+  for (const b of chunk(data, 500)) {
+    const { error } = await (
+      mode === 'insert'
+        ? supabase.from('ports').insert(b)
+        : supabase.from('ports').upsert(b, opt)
+    );
+    if (error) throw new Error('ports: ' + error.message);
+    log(`ports: processed ${b.length}`);
+  }
+}
 
     async function upsertCompanies(rows, mode){
       const data = rows.map(r=>({
