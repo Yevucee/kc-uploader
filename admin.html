@@ -390,10 +390,16 @@ function setCsvMsg(t,cls){ set('csvMsg',t,cls); }
 // Build in-memory maps for quick lookups
 async function preloadMaps(){
   const maps = {};
-  { const {data} = await supabase.from('ports').select('id,unlocode');
-    maps.portByUnlocode = new Map((data||[]).map(r=>[String(r.unlocode).toUpperCase(), r.id])); }
-  { const {data} = await supabase.from('counterparties').select('id,name');
-    maps.companyByName = new Map((data||[]).map(r=>[r.name.trim().toLowerCase(), r.id])); }
+  {
+    // we need both code->id and name->id
+    const { data } = await supabase.from('ports').select('id,unlocode,name');
+    maps.portByUnlocode = new Map((data||[]).map(r => [String(r.unlocode||'').toUpperCase(), r.id]));
+    maps.portByName     = new Map((data||[]).map(r => [String(r.name||'').trim().toLowerCase(), r.id]));
+  }
+  {
+    const { data } = await supabase.from('counterparties').select('id,name');
+    maps.companyByName = new Map((data||[]).map(r => [String(r.name||'').trim().toLowerCase(), r.id]));
+  }
   return maps;
 }
 
