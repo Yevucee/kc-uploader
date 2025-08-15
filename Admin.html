@@ -1,0 +1,448 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <title>Knowledge Centre — Admin</title>
+  <link rel="icon" href="data:,">
+  <style>
+    :root{--b:#eee;--t:#222;--muted:#666;--ok:#117a2e;--err:#b00020}
+    body{font-family:system-ui,Segoe UI,Roboto,Arial;margin:24px;max-width:1000px;color:var(--t)}
+    h1{margin:0 0 16px}
+    .tabs{display:flex;gap:8px;margin:10px 0 16px}
+    .tab{border:1px solid var(--b);border-bottom:none;padding:10px 14px;border-radius:10px 10px 0 0;background:#fafafa;cursor:pointer}
+    .tab.active{background:#fff;font-weight:600}
+    .panel{border:1px solid var(--b);border-radius:0 12px 12px 12px;padding:16px}
+    .card{border:1px solid var(--b);border-radius:12px;padding:14px;margin:16px 0}
+    .row{display:flex;gap:12px;flex-wrap:wrap}
+    input,select,textarea,button{padding:10px;border:1px solid #ddd;border-radius:8px}
+    input,select,textarea{width:100%}
+    button{cursor:pointer;background:#fff}
+    label{font-weight:600;margin-top:8px;display:block}
+    .muted{color:var(--muted)} .ok{color:var(--ok)} .err{color:var(--err)} .small{font-size:.9rem}
+    pre{white-space:pre-wrap;background:#fafafa;border:1px solid var(--b);padding:12px;border-radius:8px;max-height:260px;overflow:auto}
+    .hide{display:none}
+  </style>
+</head>
+<body>
+  <h1>Knowledge Centre — Admin</h1>
+
+  <!-- Sign-in card (magic link) -->
+  <div class="card" id="auth">
+    <p><strong>Sign in</strong> with your work email.</p>
+    <div class="row">
+      <input id="email" placeholder="you@company.com"/>
+      <button id="btnLogin">Send sign-in link</button>
+    </div>
+    <p class="muted small">You’ll receive a magic link; open it on this device.</p>
+    <p id="authMsg"></p>
+  </div>
+
+  <!-- Tabs -->
+  <div id="app" class="hide">
+    <div class="tabs">
+      <div class="tab active" data-tab="docs">Documents</div>
+      <div class="tab" data-tab="single">Add procedure</div>
+      <div class="tab" data-tab="bulk">Bulk CSV upload</div>
+    </div>
+
+    <div class="panel">
+
+      <!-- TAB: Documents (simple uploader; replace with your latest if you like) -->
+      <section id="tab-docs">
+        <div class="card">
+          <h2 style="margin-top:0">Upload a document</h2>
+
+          <div class="row">
+            <div style="flex:1;min-width:240px">
+              <label>Attach to</label>
+              <select id="attachType">
+                <option value="counterparty">Company</option>
+                <option value="procedure">Procedure</option>
+              </select>
+            </div>
+            <div style="flex:1;min-width:240px">
+              <label>If filename already exists</label>
+              <select id="conflictMode">
+                <option value="append">Append (keep both)</option>
+                <option value="overwrite">Overwrite existing</option>
+                <option value="duplicate">Duplicate (add suffix)</option>
+              </select>
+            </div>
+          </div>
+
+          <label>Search name</label>
+          <input id="searchInput" placeholder="Start typing company or procedure…"/>
+          <div class="muted small">Pick one below:</div>
+          <select id="pickId" size="6" style="width:100%"></select>
+
+          <label>Document name (how it appears)</label>
+          <input id="docName" placeholder="e.g., KYC Form, Master Agreement, Bill of Lading"/>
+
+          <label>Notes (optional)</label>
+          <textarea id="notes" rows="3" placeholder="Any context or expiry date"></textarea>
+
+          <label>File</label>
+          <input id="file" type="file"/>
+
+          <div class="row" style="margin-top:12px">
+            <button id="btnUpload">Upload & save</button>
+          </div>
+          <p id="msg"></p>
+        </div>
+      </section>
+
+      <!-- TAB: Single procedure create -->
+      <section id="tab-single" class="hide">
+        <div class="card">
+          <h2 style="margin-top:0">Create a procedure</h2>
+
+          <div class="row">
+            <div style="flex:1;min-width:280px">
+              <label>Company</label>
+              <input id="procCompanyQuery" placeholder="Type company name…"/>
+              <select id="procCompanyPick" size="6" style="width:100%;margin-top:8px"></select>
+            </div>
+
+            <div style="flex:1;min-width:280px">
+              <label>Port</label>
+              <input id="procPortQuery" placeholder="Type UN/LOCODE or port name…"/>
+              <select id="procPortPick" size="6" style="width:100%;margin-top:8px"></select>
+            </div>
+          </div>
+
+          <label>Procedure title</label>
+          <input id="procTitle" placeholder="e.g., Ajman export to Atlantic Shipping"/>
+
+          <label>Description</label>
+          <textarea id="procDescription" rows="3" placeholder="Short summary of the workflow"></textarea>
+
+          <label>Steps</label>
+          <textarea id="procSteps" rows="4" placeholder="1) …&#10;2) …"></textarea>
+
+          <label>Required documents</label>
+          <textarea id="procReqDocs" rows="3" placeholder="B/L, Cargo Manifest, SOPEP…"></textarea>
+
+          <label>Expiry date (optional)</label>
+          <input id="procExpiry" type="date"/>
+
+          <label>Notes (optional)</label>
+          <textarea id="procNotes" rows="3" placeholder="Any extra context"></textarea>
+
+          <div class="row" style="margin-top:12px">
+            <button id="btnSaveProc">Save procedure</button>
+          </div>
+          <p id="procMsg"></p>
+        </div>
+      </section>
+
+      <!-- TAB: Bulk CSV Upload -->
+      <section id="tab-bulk" class="hide">
+        <div class="card">
+          <h2 style="margin-top:0">Bulk upload (CSV)</h2>
+          <div class="row">
+            <div style="flex:1;min-width:220px">
+              <label>Dataset</label>
+              <select id="dataset">
+                <option value="ports">Ports</option>
+                <option value="counterparties">Companies</option>
+                <option value="procedures">Procedures</option>
+              </select>
+            </div>
+            <div style="flex:1;min-width:220px">
+              <label>Mode</label>
+              <select id="mode">
+                <option value="upsert">Upsert (update or insert)</option>
+                <option value="insert">Insert only</option>
+                <option value="update">Update only</option>
+              </select>
+            </div>
+            <div style="flex:2;min-width:260px">
+              <label>CSV file</label>
+              <input id="fileCsv" type="file" accept=".csv,text/csv"/>
+            </div>
+          </div>
+          <div class="row" style="margin-top:12px">
+            <button id="btnGo">Process CSV</button>
+            <a href="#" id="dlTemplate" class="muted small">Download template</a>
+          </div>
+          <p id="csvMsg" class="muted"></p>
+          <pre id="log" class="small"></pre>
+        </div>
+      </section>
+
+    </div>
+  </div>
+
+  <!-- PapaParse (CSV) -->
+  <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
+
+  <!-- App logic with Supabase -->
+  <script type="module">
+    import { createClient } from "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm";
+
+    // === Supabase init (project URL + publishable key)
+    const supabase = createClient(
+      "https://pajwufsizrmwkjveywyh.supabase.co",
+      "sb_publishable_oqLNX4lmIcMU7tiTaYzzJQ_IadAg2jm"
+    );
+    window.supabaseClient = supabase; // for quick console checks
+    const $ = id => document.getElementById(id);
+    const set = (id, text, cls)=>{ const el=$(id); if(!el) return; el.className=cls||''; el.textContent=text; };
+
+    // ----- Auth (magic link)
+    $('btnLogin').onclick = async () => {
+      const email = $('email').value.trim();
+      if(!email){ set('authMsg','Enter an email','err'); return; }
+      const { error } = await supabase.auth.signInWithOtp({
+        email,
+        options: { emailRedirectTo: window.location.href }
+      });
+      set('authMsg', error ? ('Error: '+error.message) : 'Link sent. Open it on this device.', error?'err':'ok');
+    };
+
+    function onSession(session){
+      $('auth').classList.toggle('hide', !!session);
+      $('app').classList.toggle('hide', !session);
+    }
+
+    supabase.auth.onAuthStateChange((_e, session)=> onSession(session));
+    (async()=>{ const {data:{session}} = await supabase.auth.getSession(); onSession(session); })();
+
+    // ----- Tabs
+    document.querySelectorAll('.tab').forEach(t=>{
+      t.addEventListener('click', ()=>{
+        document.querySelectorAll('.tab').forEach(x=>x.classList.remove('active'));
+        t.classList.add('active');
+        const name = t.dataset.tab;
+        document.querySelectorAll('section[id^="tab-"]').forEach(p=>p.classList.add('hide'));
+        $('tab-'+name).classList.remove('hide');
+      });
+    });
+
+    // =========================
+    // TAB: Documents (like your index.html)
+    // =========================
+    function slugify(s){ return (s||'').toLowerCase().replace(/\s+/g,'_').replace(/[^\w\-.]/g,''); }
+
+    async function searchNames(){
+      const type = $('attachType').value;
+      const q = $('searchInput').value.trim();
+      const pick = $('pickId'); pick.innerHTML='';
+      if(!q) return;
+
+      if(type==='counterparty'){
+        const {data,error} = await supabase.from('counterparties')
+          .select('id,name,type').ilike('name', `%${q}%`).order('name').limit(25);
+        if(error) return set('msg', error.message, 'err');
+        (data||[]).forEach(r=>{ const o=document.createElement('option'); o.value=r.id; o.textContent=`${r.name} (${r.type||'-'})`; pick.appendChild(o);});
+      } else {
+        const {data,error} = await supabase.from('procedures')
+          .select('id,title').ilike('title', `%${q}%`).order('title').limit(25);
+        if(error) return set('msg', error.message, 'err');
+        (data||[]).forEach(r=>{ const o=document.createElement('option'); o.value=r.id; o.textContent=r.title; pick.appendChild(o);});
+      }
+    }
+    $('searchInput').addEventListener('input', searchNames);
+
+    $('btnUpload').onclick = async ()=>{
+      const type  = $('attachType').value;
+      const mode  = $('conflictMode').value;
+      const id    = $('pickId').value;
+      const fname = $('docName').value.trim();
+      const notes = $('notes').value.trim();
+      const file  = $('file').files[0];
+
+      if(!id)   return set('msg','Pick a company/procedure first.','err');
+      if(!file) return set('msg','Choose a file.','err');
+
+      const base = (type==='counterparty') ? 'counterparties' : 'procedures';
+      const displayName = (fname || file.name).trim();
+      const targetName  = slugify(displayName) || slugify(file.name);
+
+      let objectPath = `${base}/${id}/${targetName}`;
+      const {data:list} = await supabase.storage.from('docs').list(`${base}/${id}`, { search: targetName });
+      const exists = (list||[]).some(x => x.name === targetName);
+      if(exists){
+        const ext  = targetName.includes('.') ? targetName.slice(targetName.lastIndexOf('.')) : '';
+        const stem = ext ? targetName.slice(0, -ext.length) : targetName;
+        const stamp = new Date().toISOString().slice(0,10);
+        if(mode==='duplicate' || mode==='append'){ objectPath = `${base}/${id}/${stem}-${stamp}${ext}`; }
+      }
+      const { error: upErr } = await supabase.storage.from('docs')
+        .upload(objectPath, file, { upsert: mode==='overwrite' });
+      if(upErr) return set('msg', 'Upload failed: '+upErr.message, 'err');
+
+      const storage_path = `docs/${objectPath}`;
+      const payload = { name: displayName, storage_path, notes: notes || null };
+      let ins;
+      if(type==='counterparty'){ payload.counterparty_id = id; ins = await supabase.from('counterparty_documents').insert(payload); }
+      else { payload.procedure_id = id; ins = await supabase.from('procedure_documents').insert(payload); }
+      if(ins.error) return set('msg','Saved file but DB insert failed: '+ins.error.message,'err');
+
+      set('msg','Uploaded and saved ✔','ok'); $('file').value='';
+    };
+
+    // =========================
+    // TAB: Add single procedure
+    // =========================
+    async function searchCompaniesForProc(){
+      const q = ($('procCompanyQuery')?.value || '').trim();
+      const pick = $('procCompanyPick'); pick.innerHTML='';
+      if(!q) return;
+      const {data,error} = await supabase.from('counterparties').select('id,name,type')
+        .ilike('name', `%${q}%`).order('name').limit(25);
+      if(error) return set('procMsg', error.message, 'err');
+      (data||[]).forEach(r=>{ const o=document.createElement('option'); o.value=r.id; o.textContent=`${r.name} (${r.type||'-'})`; pick.appendChild(o); });
+    }
+    async function searchPortsForProc(){
+      const q = ($('procPortQuery')?.value || '').trim();
+      const pick = $('procPortPick'); pick.innerHTML='';
+      if(!q) return;
+      const {data,error} = await supabase.from('ports').select('id,name,unlocode')
+        .or(`name.ilike.%${q}%,unlocode.ilike.%${q}%`).order('name').limit(25);
+      if(error) return set('procMsg', error.message, 'err');
+      (data||[]).forEach(r=>{ const o=document.createElement('option'); o.value=r.id; o.textContent=`${r.name} (${r.unlocode})`; pick.appendChild(o); });
+    }
+    $('procCompanyQuery')?.addEventListener('input', searchCompaniesForProc);
+    $('procPortQuery')?.addEventListener('input', searchPortsForProc);
+
+    $('btnSaveProc').onclick = async ()=>{
+      const companyId = $('procCompanyPick')?.value;
+      const portId    = $('procPortPick')?.value;
+      const title     = ($('procTitle')?.value || '').trim();
+      const description = ($('procDescription')?.value || '').trim() || null;
+      const steps       = ($('procSteps')?.value || '').trim() || null;
+      const reqDocs     = ($('procReqDocs')?.value || '').trim() || null;
+      const expiry      = $('procExpiry')?.value || null;
+      const notes       = ($('procNotes')?.value || '').trim() || null;
+
+      if(!companyId || !portId) return set('procMsg','Pick a company and a port','err');
+      if(!title) return set('procMsg','Enter a procedure title','err');
+
+      const payload = {
+        title, port_id: portId, customer_counterparty_id: companyId,
+        description, steps, required_documents: reqDocs, expiry_date: expiry, notes
+      };
+      const { error } = await supabase.from('procedures')
+        .upsert(payload, { onConflict: 'port_id,customer_counterparty_id,title' });
+      if(error) return set('procMsg','Error: '+error.message,'err');
+      set('procMsg','Saved ✓','ok');
+    };
+
+    // =========================
+    // TAB: Bulk CSV (upserts)
+    // =========================
+    const templates = {
+      ports: "name,country,unlocode,latitude,longitude,zone_code,notes\nPort Example,GB,GBLON,51.5072,-0.1276,EU-UK,Optional notes",
+      counterparties: "name,type,email,phone,notes\nAtlantic Shipping,customer,ops@example.com,+44 20 1234 5678,Key customer",
+      procedures: "title,port_unlocode,company_name,steps,required_documents,notes\nAjman to Atlantic Shipping,AEAJM,Atlantic Shipping,\"1) Notify 48h\\n2) Submit manifest\",\"B/L, Cargo Manifest\",Optional"
+    };
+    $('dlTemplate').onclick = (e)=>{
+      e.preventDefault();
+      const kind = $('dataset').value;
+      const blob = new Blob([templates[kind]], {type:'text/csv;charset=utf-8'});
+      const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
+      a.download = kind + ".csv"; a.click();
+    };
+
+    const chunk = (arr, n=500) => Array.from({length: Math.ceil(arr.length/n)}, (_,i)=>arr.slice(i*n,(i+1)*n));
+    const num = v => v===''||v==null ? null : Number(v);
+    const log = (...a)=>{ const el=$('log'); el.textContent += a.join(' ') + "\n"; };
+    function setCsvMsg(t,cls){ set('csvMsg',t,cls); }
+
+    async function preloadMaps(){
+      const maps = {};
+      { const {data} = await supabase.from('ports').select('id,unlocode');
+        maps.portByUnlocode = new Map((data||[]).map(r=>[String(r.unlocode).toUpperCase(), r.id])); }
+      { const {data} = await supabase.from('counterparties').select('id,name');
+        maps.companyByName = new Map((data||[]).map(r=>[r.name.trim().toLowerCase(), r.id])); }
+      return maps;
+    }
+
+    async function upsertPorts(rows, mode){
+      const data = rows.map(r=>({
+        name:(r.name||'').trim(), country:(r.country||'').trim(),
+        unlocode:(r.unlocode||'').trim(),
+        latitude:num(r.latitude), longitude:num(r.longitude),
+        zone_code:(r.zone_code||'').trim()||null,
+        notes:(r.notes||'').trim()||null
+      })).filter(r=>r.unlocode);
+      const opt = { onConflict:'unlocode' };
+      for(const b of chunk(data, 500)){
+        const {error} = await (mode==='insert'
+          ? supabase.from('ports').insert(b)
+          : supabase.from('ports').upsert(b, opt));
+        if(error) throw new Error('ports: '+error.message);
+        log(`ports: processed ${b.length}`);
+      }
+    }
+
+    async function upsertCompanies(rows, mode){
+      const data = rows.map(r=>({
+        name:(r.name||'').trim(),
+        type:(r.type||'').trim()||null,
+        email:(r.email||'').trim()||null,
+        phone:(r.phone||'').trim()||null,
+        notes:(r.notes||'').trim()||null
+      })).filter(r=>r.name);
+      const opt = { onConflict:'name' };
+      for(const b of chunk(data, 500)){
+        const {error} = await (mode==='insert'
+          ? supabase.from('counterparties').insert(b)
+          : supabase.from('counterparties').upsert(b, opt));
+        if(error) throw new Error('counterparties: '+error.message);
+        log(`companies: processed ${b.length}`);
+      }
+    }
+
+    async function upsertProcedures(rows, mode){
+      const maps = await preloadMaps();
+      const data = [];
+      for(const r of rows){
+        const portId = maps.portByUnlocode.get(String(r.port_unlocode||'').toUpperCase());
+        const companyId = maps.companyByName.get(String(r.company_name||'').trim().toLowerCase());
+        if(!portId || !companyId){ log(`skip: could not resolve for "${r.title}" (port=${r.port_unlocode}, company=${r.company_name})`); continue; }
+        data.push({
+          title:(r.title||'').trim(),
+          port_id:portId, customer_counterparty_id:companyId,
+          steps:(r.steps||'').trim()||null,
+          required_documents:(r.required_documents||'').trim()||null,
+          notes:(r.notes||'').trim()||null
+        });
+      }
+      if(!data.length){ log('nothing to upsert'); return; }
+      const opt = { onConflict:'port_id,customer_counterparty_id,title' };
+      for(const b of chunk(data, 300)){
+        const {error} = await (mode==='insert'
+          ? supabase.from('procedures').insert(b)
+          : supabase.from('procedures').upsert(b, opt));
+        if(error) throw new Error('procedures: '+error.message);
+        log(`procedures: processed ${b.length}`);
+      }
+    }
+
+    $('btnGo').onclick = ()=>{
+      const file = $('fileCsv').files[0];
+      const kind = $('dataset').value;
+      const mode = $('mode').value;
+      if(!file){ return setCsvMsg('Pick a CSV file','err'); }
+      setCsvMsg('Parsing CSV…');
+      $('log').textContent='';
+      Papa.parse(file, {
+        header:true, skipEmptyLines:true, dynamicTyping:false,
+        complete: async (res)=>{
+          const rows = res.data; log(`Rows parsed: ${rows.length}`);
+          try{
+            if(kind==='ports') await upsertPorts(rows, mode);
+            if(kind==='counterparties') await upsertCompanies(rows, mode);
+            if(kind==='procedures') await upsertProcedures(rows, mode);
+            setCsvMsg('Done ✓','ok');
+          }catch(e){ console.error(e); setCsvMsg('Error: '+e.message,'err'); }
+        },
+        error:(e)=> setCsvMsg('CSV parse error: '+e.message,'err')
+      });
+    };
+  </script>
+</body>
+</html>
