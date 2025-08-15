@@ -1,10 +1,10 @@
 <!doctype html>
-<!-- redeploy -->
 <html lang="en">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>Knowledge Centre — Upload</title>
+  <link rel="icon" href="data:,">
   <style>
     body{font-family:system-ui,Segoe UI,Roboto,Arial;margin:24px;max-width:900px}
     .card{border:1px solid #eee;border-radius:12px;padding:14px;margin:16px 0}
@@ -16,30 +16,6 @@
     .muted{opacity:.75}.ok{color:#117a2e}.err{color:#b00020}.small{font-size:.9rem}
   </style>
 </head>
-  <script>
-  function safeLogin(){
-    const out = document.getElementById('authMsg');
-    try {
-      const email = (document.getElementById('email')?.value || '').trim();
-      if (!email) { out.className='err'; out.textContent='Enter an email'; return; }
-      if (!window.supabaseClient) { out.className='err'; out.textContent='Supabase not ready'; return; }
-
-      window.supabaseClient.auth.signInWithOtp({
-        email,
-        options: { emailRedirectTo: window.location.href }
-      }).then(({ error }) => {
-        out.className = error ? 'err' : 'ok';
-        out.textContent = error ? `Error: ${error.message}` : 'Link sent. Open it on this device.';
-      }).catch((e)=>{
-        out.className='err'; out.textContent='Login error: ' + e.message;
-        console.error(e);
-      });
-    } catch(e){
-      out.className='err'; out.textContent='Login script error';
-      console.error(e);
-    }
-  }
-</script>
 <body>
   <h1>Upload a document</h1>
 
@@ -92,27 +68,26 @@
     <p id="msg"></p>
   </div>
 
-  <!-- Use ES modules so we don't rely on a global -->
+  <!-- Supabase + app logic -->
   <script type="module">
     import { createClient } from "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm";
 
+    // Initialise client and expose for console checks
     const supabase = createClient(
       "https://pajwufsizrmwkjveywyh.supabase.co",
-      "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBhand1ZnNpenJtd2tqdmV5d3loIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTQ5MjEyNjIsImV4cCI6MjA3MDQ5NzI2Mn0.atSQj2ekJo_fePOOhMjbzRav98a7nX-TQY3NgsFXk98"
+      "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBhand1ZnNpenJtd2tqdmV5d3loIiwicm9zZSI6ImFub24iLCJpYXQiOjE3NTQ5MjEyNjIsImV4cCI6MjA3MDQ5NzI2Mn0.atSQj2ekJo_fePOOhMjbzRav98a7nX-TQY3NgsFXk98"
     );
-
-    // expose for quick console check if needed
     window.supabaseClient = supabase;
 
-    // Bind UI handlers after DOM is ready
+    // Helpers
     const $ = (id)=>document.getElementById(id);
-    $("#btnLogin").addEventListener("click", login);
-    $("#btnUpload").addEventListener("click", doUpload);
-    $("#attachType").addEventListener("change", resetPicker);
-    $("#searchInput").addEventListener("input", searchNames);
+    function setMsg(id, text, cls){ const el=$(id); if(!el) return; el.className=cls||''; el.textContent=text; }
+    function slugify(s){ return (s||'').toLowerCase().replace(/\s+/g,'_').replace(/[^\w\-.]/g,''); }
+    function resetPicker(){ const p=$('pickId'); if(p) p.innerHTML=''; const si=$('searchInput'); if(si) si.value=''; }
 
+    // Actions
     async function login(){
-      const email = $("#email").value.trim();
+      const email = ($('email')?.value || '').trim();
       if(!email){ setMsg('authMsg','Enter an email','err'); return; }
       const { error } = await supabase.auth.signInWithOtp({
         email,
@@ -120,19 +95,12 @@
       });
       setMsg('authMsg', error ? ('Error: '+error.message) : 'Link sent. Open it on this device.', error?'err':'ok');
     }
-
-    supabase.auth.onAuthStateChange((_evt, session) => {
-      $("#uploader").style.display = session ? 'block' : 'none';
-    });
-
-    function setMsg(id, text, cls){ const el=$(id); el.className=cls||''; el.textContent=text; }
-    function slugify(s){ return (s||'').toLowerCase().replace(/\s+/g,'_').replace(/[^\w\-.]/g,''); }
-    function resetPicker(){ $("#pickId").innerHTML=''; $("#searchInput").value=''; }
+    window.login = login; // (expose just in case)
 
     async function searchNames(){
-      const type = $("#attachType").value;
-      const q = $("#searchInput").value.trim();
-      const pick = $("#pickId");
+      const type = $('attachType')?.value;
+      const q = ($('searchInput')?.value || '').trim();
+      const pick = $('pickId'); if (!pick) return;
       pick.innerHTML = '';
       if(!q) return;
 
@@ -158,22 +126,21 @@
     }
 
     async function doUpload(){
-      const type  = $("#attachType").value;
-      const mode  = $("#conflictMode").value;
-      const id    = $("#pickId").value;
-      const fname = $("#docName").value.trim();
-      const notes = $("#notes").value.trim();
-      const file  = $("#file").files[0];
-      const msg   = $("#msg");
+      const type  = $('attachType')?.value;
+      const mode  = $('conflictMode')?.value;
+      const id    = $('pickId')?.value;
+      const fname = ($('docName')?.value || '').trim();
+      const notes = ($('notes')?.value || '').trim();
+      const file  = $('file')?.files?.[0];
+      const msgEl = $('msg');
 
-      if(!id){ msg.innerHTML='<span class="err">Pick a company/procedure first.</span>'; return; }
-      if(!file){ msg.innerHTML='<span class="err">Choose a file.</span>'; return; }
+      if(!id){ msgEl.innerHTML='<span class="err">Pick a company/procedure first.</span>'; return; }
+      if(!file){ msgEl.innerHTML='<span class="err">Choose a file.</span>'; return; }
 
       const base = (type==='counterparty') ? 'counterparties' : 'procedures';
       const displayName = (fname || file.name).trim();
       const targetName  = slugify(displayName) || slugify(file.name);
 
-      // Check name conflict
       let objectPath = `${base}/${id}/${targetName}`;
       const { data:list } = await supabase.storage.from('docs').list(`${base}/${id}`, { search: targetName });
       const exists = (list || []).some(x => x.name === targetName);
@@ -182,15 +149,12 @@
         const stem = ext ? targetName.slice(0, -ext.length) : targetName;
         const stamp = new Date().toISOString().slice(0,10);
         if(mode==='duplicate' || mode==='append'){ objectPath = `${base}/${id}/${stem}-${stamp}${ext}`; }
-        // overwrite keeps same name
       }
 
-      // Upload to Storage
       const { error: upErr } = await supabase.storage.from('docs')
         .upload(objectPath, file, { upsert: mode==='overwrite' });
-      if(upErr){ msg.innerHTML = `<span class="err">Upload failed: ${upErr.message}</span>`; return; }
+      if(upErr){ msgEl.innerHTML = `<span class="err">Upload failed: ${upErr.message}</span>`; return; }
 
-      // Save metadata
       const storage_path = `docs/${objectPath}`;
       const payload = { name: displayName, storage_path, notes: notes || null };
       let ins;
@@ -201,11 +165,24 @@
         payload.procedure_id = id;
         ins = await supabase.from('procedure_documents').insert(payload);
       }
-      if(ins.error){ msg.innerHTML = `<span class="err">Saved file but DB insert failed: ${ins.error.message}</span>`; return; }
+      if(ins.error){ msgEl.innerHTML = `<span class="err">Saved file but DB insert failed: ${ins.error.message}</span>`; return; }
 
-      msg.innerHTML = `<span class="ok">Uploaded and saved ✔</span>`;
-      $("#file").value='';
+      msgEl.innerHTML = `<span class="ok">Uploaded and saved ✔</span>`;
+      $('file').value='';
     }
+
+    // Bind **after** DOM is ready (prevents null addEventListener)
+    document.addEventListener('DOMContentLoaded', () => {
+      $('btnLogin')?.addEventListener('click', login);
+      $('btnUpload')?.addEventListener('click', doUpload);
+      $('attachType')?.addEventListener('change', resetPicker);
+      $('searchInput')?.addEventListener('input', searchNames);
+    });
+
+    // Show/hide uploader based on auth state
+    supabase.auth.onAuthStateChange((_evt, session) => {
+      const up = $('uploader'); if (up) up.style.display = session ? 'block' : 'none';
+    });
   </script>
 </body>
 </html>
